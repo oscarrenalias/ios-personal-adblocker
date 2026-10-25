@@ -19,15 +19,15 @@ public enum AppEnvironment {
     }
 
     public static var refreshTaskID: String {
-        (Bundle.main.bundleIdentifier ?? "iblocker") + ".refresh"
+        (Bundle.main.bundleIdentifier ?? "net.renalias.adblocker") + ".refresh"
     }
 
     public static var tunnelBundleID: String {
-        (Bundle.main.bundleIdentifier ?? "iblocker") + ".tunnel"
+        (Bundle.main.bundleIdentifier ?? "net.renalias.adblocker") + ".tunnel"
     }
 
     public static var contentBlockerBundleID: String {
-        (Bundle.main.bundleIdentifier ?? "iblocker") + ".blocker"
+        (Bundle.main.bundleIdentifier ?? "net.renalias.adblocker") + ".blocker"
     }
 }
 #endif
