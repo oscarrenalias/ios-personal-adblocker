@@ -162,7 +162,12 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
         guard new != lastStatus else { return }
         let old = lastStatus
         lastStatus = new
-        Self.log.notice("resolver status \(old) -> \(new), encrypted \((alternative?.encrypted ?? false) ? "yes" : "no")")
+        Self.log.notice("resolver status \(old) -> \(new), encrypted \(Self.isEncrypted(new) ? "yes" : "no")")
+    }
+
+    private static func isEncrypted(_ status: ResolverStatus) -> Bool {
+        if case .alternative(_, let encrypted) = status { return encrypted }
+        return false
     }
 
     private static func probeQuery() -> Data {
@@ -191,19 +196,31 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
         }
     }
 
+    /// Returns as soon as the operation finishes or the deadline passes, whichever is first.
+    /// Unlike a task group, it does not wait for an operation that ignores cancellation;
+    /// a late result from the abandoned operation is dropped.
     private static func withTimeout<T: Sendable>(
         _ seconds: TimeInterval,
         _ operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                throw ResolverRouterError.timeout
+        let gate = TimeoutGate<T>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                gate.install(continuation)
+                let work = Task {
+                    do { gate.finish(.success(try await operation())) }
+                    catch { gate.finish(.failure(error)) }
+                }
+                let timer = Task {
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                        gate.finish(.failure(ResolverRouterError.timeout))
+                    } catch {}
+                }
+                gate.setTasks([work, timer])
             }
-            defer { group.cancelAll() }
-            guard let first = try await group.next() else { throw ResolverRouterError.timeout }
-            return first
+        } onCancel: {
+            gate.finish(.failure(CancellationError()))
         }
     }
 
@@ -223,5 +240,44 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
     private static func describe(_ query: DNSQuery?, rule: String) -> String {
         guard let query else { return "route rule=\(rule) unparseable" }
         return "route domain=\(query.questionName) qtype=\(DNSRecordType.name(query.qtype)) rule=\(rule)"
+    }
+}
+
+/// Resumes its continuation exactly once with the first result and cancels the other task.
+private final class TimeoutGate<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Error>?
+    private var pending: Result<T, Error>?
+    private var done = false
+    private var tasks: [Task<Void, Never>] = []
+
+    func install(_ c: CheckedContinuation<T, Error>) {
+        let early: Result<T, Error>? = lock.withLock {
+            if let r = pending { return r }
+            continuation = c
+            return nil
+        }
+        if let early { c.resume(with: early) }
+    }
+
+    func setTasks(_ t: [Task<Void, Never>]) {
+        let cancelNow = lock.withLock { () -> Bool in
+            tasks = t
+            return done
+        }
+        if cancelNow { t.forEach { $0.cancel() } }
+    }
+
+    func finish(_ result: Result<T, Error>) {
+        let (c, toCancel): (CheckedContinuation<T, Error>?, [Task<Void, Never>]) = lock.withLock {
+            guard !done else { return (nil, []) }
+            done = true
+            let c = continuation
+            continuation = nil
+            if c == nil { pending = result }
+            return (c, tasks)
+        }
+        toCancel.forEach { $0.cancel() }
+        c?.resume(with: result)
     }
 }

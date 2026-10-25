@@ -98,6 +98,35 @@ final class ResolverRouterTests: XCTestCase {
         XCTAssertEqual(net.calls, 1)
     }
 
+    /// An upstream that ignores task cancellation, like UDPUpstream's continuation.
+    private func stubborn() -> Mock {
+        Mock { q in
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 5) { c.resume() }
+            }
+            return answer(q)
+        }
+    }
+
+    func testNonCooperativeAlternativeTimesOutAtDeadlineAndRecordsFailure() async throws {
+        let net = ok(), alt = stubborn()
+        let r = router(network: net, alt: alt,
+                       breaker: CircuitBreaker(name: "Alt", effect: "x", failureThreshold: 1))
+        let start = Date()
+        let resp = try await r.resolve(q("example.com"))
+        XCTAssertLessThan(Date().timeIntervalSince(start), 3)
+        XCTAssertEqual(rcode(resp), 0)
+        XCTAssertEqual(net.calls, 1)
+        XCTAssertEqual(r.status, .fallingBack(name: "Alt"))
+    }
+
+    func testNonCooperativeAlternativePolicyNoneThrowsPromptly() async {
+        let r = router(network: ok(), alt: stubborn(), policy: .none)
+        let start = Date()
+        do { _ = try await r.resolve(q("example.com")); XCTFail("expected throw") } catch {}
+        XCTAssertLessThan(Date().timeIntervalSince(start), 3)
+    }
+
     func testThreeFailuresTripThenNetworkWithoutAlternative() async throws {
         let net = ok(), alt = failing()
         let r = router(network: net, alt: alt, breaker: CircuitBreaker(name: "Alt", effect: "x"))
