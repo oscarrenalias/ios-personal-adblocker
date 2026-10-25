@@ -27,7 +27,11 @@ worth knowing.
 
 ### KI-1: No fallback when the DNS resolver is unreachable
 
-- **Status:** open
+- **Status:** spec written:
+  [`spec-a5bcca33`](../specs/drafts/network-dns-fallback-with-optional-alternative-resolver.md)
+- **Severity note:** real but rare in practice. Lockdown has the same
+  weakness (one Cloudflare DoH server, no fallback) and works fine day to day.
+  It's kept first because the fix also adds network DNS as the default.
 - **Where:** `ios/IBlockerKit/Sources/IBlockerKit/Engine/DNSProxyEngine.swift`
   (`forward`), `ios/IBlockerKit/Sources/IBlockerTunnelKit/UpstreamFactory.swift`
 
