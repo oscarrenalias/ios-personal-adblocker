@@ -188,4 +188,60 @@ final class SharedSettingsTests: XCTestCase {
             XCTAssertEqual(try JSONDecoder().decode(FallbackPolicy.self, from: data), policy)
         }
     }
+
+    // MARK: - Old Quad9 URL migration
+
+    private let oldQuad9 = "https://9.9.9.9:5053/dns-query"
+
+    private func store(_ rs: ResolverSettings, suite: String) throws {
+        UserDefaults(suiteName: suite)!.set(try JSONEncoder().encode(rs), forKey: SharedSettings.Keys.resolverSettings)
+    }
+
+    func testStoredOldQuad9ReadsAsNewQuad9() throws {
+        let (settings, suite) = makeSettings()
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let stored = ResolverSettings(
+            useAlternative: true,
+            alternative: UpstreamConfig(kind: .doh, dohURL: oldQuad9),
+            alternativeName: "Quad9", fallbackPolicy: .none)
+        try store(stored, suite: suite)
+        let rawBefore = UserDefaults(suiteName: suite)!.data(forKey: SharedSettings.Keys.resolverSettings)
+
+        for _ in 0..<2 {
+            let read = settings.resolverSettings
+            XCTAssertEqual(read.alternative, UpstreamConfig(kind: .doh, dohURL: "https://9.9.9.9/dns-query"))
+            XCTAssertEqual(read.alternativeName, "Quad9")
+            XCTAssertTrue(read.useAlternative)
+            XCTAssertEqual(read.fallbackPolicy, .none)
+        }
+        XCTAssertEqual(UserDefaults(suiteName: suite)!.data(forKey: SharedSettings.Keys.resolverSettings), rawBefore)
+    }
+
+    func testLegacyOldQuad9UpstreamDerivesNewQuad9() {
+        let (settings, suite) = makeSettings()
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        settings.upstreamConfig = UpstreamConfig(kind: .doh, dohURL: oldQuad9)
+        let read = settings.resolverSettings
+        XCTAssertEqual(read.alternative, UpstreamPreset.quad9.config)
+        XCTAssertEqual(read.alternativeName, "Quad9")
+        XCTAssertTrue(read.useAlternative)
+        XCTAssertEqual(read.fallbackPolicy, .networkDNS)
+    }
+
+    func testNonOldQuad9SettingsAreUnchanged() throws {
+        let configs = [
+            UpstreamConfig(kind: .doh, dohURL: "https://dns.example.com/dns-query"),
+            UpstreamConfig(kind: .udp, udpAddress: "9.9.9.9"),
+            UpstreamPreset.quad9.config,
+        ]
+        for config in configs {
+            let (settings, suite) = makeSettings()
+            defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+            let stored = ResolverSettings(
+                useAlternative: true, alternative: config,
+                alternativeName: "Whatever", fallbackPolicy: .networkDNS)
+            try store(stored, suite: suite)
+            XCTAssertEqual(settings.resolverSettings, stored)
+        }
+    }
 }

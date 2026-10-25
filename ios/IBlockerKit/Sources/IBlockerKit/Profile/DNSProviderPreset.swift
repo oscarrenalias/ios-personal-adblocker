@@ -79,7 +79,7 @@ public struct DNSProviderPreset: Identifiable, Sendable, Equatable {
         transport: .https,
         serverURL: "https://dns.quad9.net/dns-query",
         addresses: ["9.9.9.9", "149.112.112.112", "2620:fe::fe", "2620:fe::9"],
-        tunnelDoHURL: "https://9.9.9.9:5053/dns-query",
+        tunnelDoHURL: "https://9.9.9.9/dns-query",
         blocksAds: false
     )
 

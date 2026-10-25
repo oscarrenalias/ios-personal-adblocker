@@ -24,6 +24,16 @@ public struct UpstreamPreset: Sendable, Equatable, Identifiable {
         label: "Cloudflare (DoH)",
         config: UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.1/dns-query"))
 
+    public static let cloudflareMalware = UpstreamPreset(
+        name: "Cloudflare (malware blocking)",
+        label: "Cloudflare (DoH, malware blocking)",
+        config: UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.2/dns-query"))
+
+    public static let cloudflareFamily = UpstreamPreset(
+        name: "Cloudflare (family)",
+        label: "Cloudflare (DoH, malware + adult content blocking)",
+        config: UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.3/dns-query"))
+
     public static let adGuard = UpstreamPreset(
         name: "AdGuard DNS",
         label: "AdGuard DNS (DoH, extra blocking)",
@@ -32,7 +42,7 @@ public struct UpstreamPreset: Sendable, Equatable, Identifiable {
     public static let quad9 = UpstreamPreset(
         name: "Quad9",
         label: "Quad9 (DoH, malware blocking)",
-        config: UpstreamConfig(kind: .doh, dohURL: "https://9.9.9.9:5053/dns-query"))
+        config: UpstreamConfig(kind: .doh, dohURL: "https://9.9.9.9/dns-query"))
 
     public static let cloudflareUDP = UpstreamPreset(
         name: "Cloudflare (UDP)",
@@ -45,7 +55,8 @@ public struct UpstreamPreset: Sendable, Equatable, Identifiable {
         config: UpstreamConfig(kind: .udp, udpAddress: "9.9.9.9"))
 
     public static let all: [UpstreamPreset] = [
-        cloudflare, adGuard, quad9, cloudflareUDP, quad9UDP,
+        cloudflare, cloudflareMalware, cloudflareFamily, adGuard, quad9,
+        cloudflareUDP, quad9UDP,
     ]
 
     /// The preset name matching `config`, or "Custom" when none matches.

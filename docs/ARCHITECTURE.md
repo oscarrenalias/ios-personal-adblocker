@@ -109,7 +109,14 @@ in shared defaults. If it's missing, it's derived on read from the old
 `upstreamConfig` without writing (DoH/UDP becomes an enabled alternative with
 `.networkDNS`; missing or network becomes off). The app sends
 `setResolverSettings` over IPC and the tunnel rebuilds the router, which
-resets breaker state. Presets live in `UpstreamPreset`. At boot, until
+resets breaker state. Presets live in `UpstreamPreset`: seven, in order Cloudflare (DoH),
+Cloudflare (malware blocking, `1.1.1.2`), Cloudflare (family, `1.1.1.3`),
+AdGuard DNS, Quad9 (DoH, `https://9.9.9.9/dns-query`, port 443), Cloudflare
+(UDP) and Quad9 (UDP). Port 5053 timed out on a home network, so Quad9 uses
+443; the system encrypted-DNS preset (`DNSProviderPreset.quad9.tunnelDoHURL`)
+matches. On read, a stored DoH alternative of `https://9.9.9.9:5053/dns-query`
+is replaced in memory by the Quad9 preset config and name (nothing is written
+back; other URLs are untouched) and logged once per process. At boot, until
 settings are readable, the router runs with defaults and is rebuilt on recovery.
 
 ## Memory (the 50 MB extension budget)

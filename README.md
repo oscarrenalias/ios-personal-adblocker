@@ -20,6 +20,9 @@ address of a server such as `ads.example.com`:
   **Network DNS**: the resolver of the Wi-Fi or cellular network you're
   connected to. In Settings you can turn on an **alternative DNS** (an
   encrypted DNS provider using DNS over HTTPS, or a plain DNS server).
+  Presets: Cloudflare, Cloudflare with malware blocking, Cloudflare with
+  malware and adult content blocking, AdGuard DNS, Quad9 (all DoH), and
+  Cloudflare and Quad9 over plain UDP.
 
 The alternative is used while it works. If it can't be reached (captive
 Wi-Fi, a network that blocks DNS over HTTPS, a resolver outage), lookups fall
