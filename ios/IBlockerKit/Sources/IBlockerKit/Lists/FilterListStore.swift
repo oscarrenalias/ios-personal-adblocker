@@ -10,6 +10,8 @@ public actor FilterListStore {
     private let updater: FilterListUpdater
     private let log = Log(category: "lists")
     private var inFlightUpdate: Task<UpdateSummary, Never>?
+    /// Scope of `inFlightUpdate`; nil means a full run over every source.
+    private var inFlightScope: Set<String>?
 
     /// What started an update run; logged only.
     public enum UpdateTrigger: String, Sendable {
@@ -48,24 +50,44 @@ public actor FilterListStore {
     /// awaits that run and returns its summary without downloading again.
     public func updateAll(force: Bool = false, trigger: UpdateTrigger) async -> UpdateSummary {
         if let running = inFlightUpdate {
-            log.debug("update joined in-flight run (trigger \(trigger.rawValue))")
-            return await running.value
+            if inFlightScope == nil {
+                log.debug("update joined in-flight run (trigger \(trigger.rawValue))")
+                return await running.value
+            }
+            // A partial run doesn't cover every source; wait for it, then run.
+            _ = await running.value
+            return await updateAll(force: force, trigger: trigger)
         }
-        let task = Task { await self.runUpdate(force: force, trigger: trigger) }
+        return await start(scope: nil, force: force, trigger: trigger)
+    }
+
+    /// Fetches and validates only `sourceIDs`, recompiling if any changed.
+    /// Serialized with every other update run: waits for one in progress.
+    public func update(sourceIDs: Set<String>, force: Bool = false, trigger: UpdateTrigger) async -> UpdateSummary {
+        while let running = inFlightUpdate {
+            _ = await running.value
+        }
+        return await start(scope: sourceIDs, force: force, trigger: trigger)
+    }
+
+    private func start(scope: Set<String>?, force: Bool, trigger: UpdateTrigger) async -> UpdateSummary {
+        let task = Task { await self.runUpdate(force: force, trigger: trigger, scope: scope) }
         inFlightUpdate = task
+        inFlightScope = scope
         let summary = await task.value
         inFlightUpdate = nil
+        inFlightScope = nil
         return summary
     }
 
-    private func runUpdate(force: Bool, trigger: UpdateTrigger) async -> UpdateSummary {
+    private func runUpdate(force: Bool, trigger: UpdateTrigger, scope: Set<String>?) async -> UpdateSummary {
         let started = Date()
         log.info("update started (trigger \(trigger.rawValue), force \(force))")
 
         // Fetch against a snapshot so the actor stays free for mutate() during
         // the downloads; only the touched metadata is merged back afterwards.
         var snapshot = FilterListState.load(from: paths.filterStateURL)
-        let summary = await updater.update(state: &snapshot, force: force)
+        let summary = await updater.update(state: &snapshot, force: force, onlySourceIDs: scope)
         let touched = Set(summary.updatedSourceIDs + summary.unchangedSourceIDs
                           + summary.rejectedSourceIDs + Array(summary.failedSourceIDs.keys))
         do {

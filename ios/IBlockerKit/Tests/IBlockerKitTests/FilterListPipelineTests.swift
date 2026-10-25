@@ -314,4 +314,54 @@ final class FilterListPipelineTests: XCTestCase {
         XCTAssertEqual(compiles.value, 1)
         XCTAssertEqual(FilterListState.load(from: paths.filterStateURL).metadata["test"]?.entryCount, 5)
     }
+
+    // MARK: Targeted update (add custom list)
+
+    private final class URLRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var urls: [String] = []
+        func add(_ u: String) { lock.lock(); urls.append(u); lock.unlock() }
+        var value: [String] { lock.lock(); defer { lock.unlock() }; return urls }
+    }
+
+    private func runTargeted(_ respond: @escaping @Sendable (URLRequest) throws -> FetchResult)
+        async throws -> (UpdateSummary, [String]) {
+        let paths = AppGroupPaths(containerURL: try makeTempDirectory())
+        try paths.ensureDirectories()
+        let seen = URLRecorder()
+        let store = FilterListStore(paths: paths) { request in
+            seen.add(request.url?.absoluteString ?? "?")
+            return try respond(request)
+        }
+        let other = URL(string: "https://other.example.com/o.txt")!
+        try await store.mutate { state in
+            for i in state.sources.indices { state.sources[i].enabled = false }
+            state.sources.append(FilterListSource(id: "old", name: "Old", url: other, enabled: true, isBuiltIn: false))
+            state.sources.append(FilterListSource(id: "new", name: "New", url: self.url, enabled: true, isBuiltIn: false))
+        }
+        let summary = await store.update(sourceIDs: ["new"], trigger: .user)
+        return (summary, seen.value)
+    }
+
+    func testTargetedUpdateReportsRejectionReasonForHTMLPage() async throws {
+        let html = Data("<!DOCTYPE html><html><body>Example Domain</body></html>".utf8)
+        let (summary, fetched) = try await runTargeted { _ in FetchResult(statusCode: 200, body: html) }
+        XCTAssertEqual(summary.rejectedSourceIDs, ["new"])
+        XCTAssertEqual(summary.rejectedReasons["new"], "Server returned a web page, not a list")
+        XCTAssertEqual(fetched, [url.absoluteString])
+    }
+
+    func testTargetedUpdateReportsNetworkFailure() async throws {
+        let (summary, fetched) = try await runTargeted { _ in throw URLError(.notConnectedToInternet) }
+        XCTAssertEqual(summary.failedSourceIDs["new"], "No internet connection")
+        XCTAssertTrue(summary.rejectedReasons.isEmpty)
+        XCTAssertEqual(fetched, [url.absoluteString])
+    }
+
+    func testTargetedUpdateAcceptsValidList() async throws {
+        let data = body(5)
+        let (summary, fetched) = try await runTargeted { _ in FetchResult(statusCode: 200, body: data) }
+        XCTAssertEqual(summary.updatedSourceIDs, ["new"])
+        XCTAssertEqual(fetched, [url.absoluteString])
+    }
 }

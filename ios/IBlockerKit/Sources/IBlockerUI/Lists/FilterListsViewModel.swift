@@ -10,10 +10,14 @@ public final class FilterListsViewModel {
     public private(set) var state: FilterListState
     public private(set) var isUpdating = false
     public private(set) var lastCompileStats: CompileStats?
+    /// Set by full update runs only; shown at the bottom of the Lists tab.
     public var errorMessage: String?
+    /// Set by the add-custom-list flow only; shown in the add sheet.
+    public var addListError: String?
 
     private let paths: AppGroupPaths
     private let store: FilterListStore
+    private let log = Log(category: "lists")
 
     public init(paths: AppGroupPaths, store: FilterListStore = AppEnvironment.listStore) {
         self.paths = paths
@@ -64,12 +68,15 @@ public final class FilterListsViewModel {
         do {
             try await store.mutate { state in state.sources.append(source) }
         } catch {
-            errorMessage = "Could not save the new list"
+            addListError = "Could not save the new list"
+            log.notice("custom list \(id) add failed: could not save")
             return false
         }
-        let summary = await store.updateAll(force: false, trigger: .user)
+        let summary = await store.update(sourceIDs: [id], force: false, trigger: .user)
         guard summary.updatedSourceIDs.contains(id) else {
-            errorMessage = summary.failedSourceIDs[id] ?? "Download failed"
+            let reason = summary.rejectedReasons[id] ?? summary.failedSourceIDs[id] ?? "Download failed"
+            addListError = reason
+            log.notice("custom list \(id) add failed: \(reason)")
             // Roll back the probe so a rejected source never lingers.
             try? await store.mutate { state in
                 state.sources.removeAll { $0.id == id }
@@ -80,6 +87,7 @@ public final class FilterListsViewModel {
             return false
         }
         reloadState()
+        log.info("custom list \(id) added: \(state.metadata[id]?.entryCount ?? 0) rules")
         await compileOnly()
         return true
     }
@@ -127,6 +135,7 @@ public final class FilterListsViewModel {
     public func updateAndCompile(force: Bool, trigger: FilterListStore.UpdateTrigger = .user) async {
         guard !isUpdating else { return }
         isUpdating = true
+        errorMessage = nil
         defer { isUpdating = false }
 
         let summary = await store.updateAll(force: force, trigger: trigger)

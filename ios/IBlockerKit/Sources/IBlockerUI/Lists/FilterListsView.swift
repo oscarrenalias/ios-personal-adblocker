@@ -49,8 +49,18 @@ public struct FilterListsView: View {
 
                 if let error = lists.errorMessage {
                     Section {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+                        HStack {
+                            Label(error, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Spacer()
+                            Button {
+                                lists.errorMessage = nil
+                            } label: {
+                                Image(systemName: "xmark")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Dismiss")
+                        }
                     }
                 }
             }
@@ -161,13 +171,14 @@ private struct AddCustomListSheet: View {
                 Section {
                     TextField("Name", text: $name)
                     TextField("https://…", text: $urlText)
+                        .onChange(of: urlText) { lists.addListError = nil }
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 } footer: {
                     Text("Any hosts-format, domain-list or AdGuard-style DNS list URL. The list is test-downloaded before it's added.")
                 }
-                if let error = lists.errorMessage, isValidating == false {
+                if let error = lists.addListError, isValidating == false {
                     Section {
                         Text(error).foregroundStyle(.orange)
                     }
@@ -186,7 +197,7 @@ private struct AddCustomListSheet: View {
                         Button("Add") {
                             guard let url = URL(string: urlText.trimmingCharacters(in: .whitespaces)),
                                   url.scheme == "https" else {
-                                lists.errorMessage = "Enter a valid https:// URL"
+                                lists.addListError = "Enter a valid https:// URL"
                                 return
                             }
                             isValidating = true
@@ -204,6 +215,8 @@ private struct AddCustomListSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .onAppear { lists.addListError = nil }
+        .onDisappear { lists.addListError = nil }
     }
 }
 #endif
