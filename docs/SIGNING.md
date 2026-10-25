@@ -36,16 +36,16 @@ in the entitlements.
 The `com.apple.developer.networking.networkextension` entitlement
 (`packet-tunnel-provider`) is only issued to paid Apple Developer accounts.
 A free "Personal Team" build will fail signing for the app and tunnel
-targets. With a free account you can still build a variant without the VPN
-(profile export + Safari blocker only), but the system-wide blocking — the
-point of this app — needs the paid account.
+targets.
 
 ## Common issues
 
 - **"Cannot create a … provisioning profile" / missing entitlement**: your
-  account hasn't finished processing the capability. Xcode ▸ Signing &
-  Capabilities for each target → check the errors; sometimes toggling
-  "Automatically manage signing" off/on forces a profile refresh.
+  account hasn't finished processing the capability. Wait a few minutes,
+  re-run `xcodegen generate`, and build again. From the command line,
+  `xcodebuild -allowProvisioningUpdates` makes Xcode fetch fresh profiles.
+  Don't fix signing in Xcode's Signing & Capabilities tab — the next
+  `xcodegen generate` discards those changes.
 - **App Group mismatch**: if you change `BUNDLE_ID_PREFIX` after a first
   install, delete the app from the device (the old VPN configuration
   references the old bundle ID) and reinstall.

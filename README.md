@@ -105,8 +105,7 @@ connects to:
 
 The log of lookups stays on the phone. It's a fixed-size file of about 4 MB
 that overwrites itself, and you can turn it off in Settings. Your DNS
-resolver still sees the lookups that aren't blocked. See
-[docs/PRIVACY.md](docs/PRIVACY.md).
+resolver still sees the lookups that aren't blocked.
 
 ## Project layout
 
@@ -121,7 +120,7 @@ ios/
   PacketTunnel/       The VPN extension
   ContentBlocker/     The Safari content blocker
   Widgets/            Home Screen widgets and a Control Center toggle
-docs/                 Architecture, blocking modes, privacy, signing
+docs/                 Architecture, blocking modes, signing
 specs/                Specs for planned work (takt)
 ```
 
