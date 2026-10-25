@@ -9,6 +9,8 @@ import IBlockerKit
 /// current network (Wi-Fi/cellular, VPN-free) hands out. It never queries the
 /// tunnel's own virtual DNS addresses, which would loop back into the tunnel.
 public struct NetworkDNSUpstream: DNSUpstream {
+    fileprivate static let log = Log(category: "network-dns")
+
     /// Returns the physical interface index to query on, or nil when no
     /// usable network is available.
     public typealias InterfaceIndexProvider = @Sendable () -> UInt32?
@@ -26,18 +28,33 @@ public struct NetworkDNSUpstream: DNSUpstream {
         do {
             parsed = try DNSParser.parseQuery(query)
         } catch {
+            Self.log.debug("unparseable query rejected: \(error)")
             throw UpstreamError.badResponse
         }
         // Index 0 is kDNSServiceInterfaceIndexAny, which could route via the tunnel.
-        guard let index = interfaceIndex(), index != 0 else {
+        let resolved = interfaceIndex()
+        guard let index = resolved, index != 0 else {
+            Self.log.debug("query \(parsed.questionName) rejected: \(resolved == nil ? "no network interface" : "zero interface index")")
             throw UpstreamError.connectionFailed("no network interface")
         }
 
         let session = QuerySession(name: parsed.questionName, type: parsed.qtype,
                                    klass: parsed.qclass, interfaceIndex: index, timeout: timeout)
-        let outcome = try await session.run()
+        Self.log.debug("query start: \(parsed.questionName) qtype \(parsed.qtype) interface index \(index)")
+        let started = Date()
+        let outcome: QueryOutcome
+        do {
+            outcome = try await session.run()
+        } catch {
+            let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
+            Self.log.debug("query failed: \(parsed.questionName) qtype \(parsed.qtype) after \(elapsedMs) ms: \(error)")
+            throw error
+        }
         switch outcome {
         case .answer(let rcode, let records):
+            let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
+            let cnames = records.filter { $0.type == 5 }.count
+            Self.log.debug("query complete: \(parsed.questionName) qtype \(parsed.qtype) rcode \(rcode), \(records.count) answer records (\(cnames) CNAME), \(elapsedMs) ms")
             return DNSResponseBuilder.response(for: parsed, rcode: rcode, records: records)
         }
     }
@@ -108,16 +125,21 @@ private final class QuerySession: @unchecked Sendable {
         }, retained.toOpaque())
 
         guard err == kDNSServiceErr_NoError, let ref else {
+            NetworkDNSUpstream.log.debug("DNSServiceQueryRecord error \(err) for \(name) on interface \(interfaceIndex)")
             finish(.failure(UpstreamError.connectionFailed("DNSServiceQueryRecord error \(err)")))
             return
         }
         serviceRef = ref
         let status = DNSServiceSetDispatchQueue(ref, queue)
         guard status == kDNSServiceErr_NoError else {
+            NetworkDNSUpstream.log.debug("DNSServiceSetDispatchQueue error \(status) for \(name)")
             finish(.failure(UpstreamError.connectionFailed("DNSServiceSetDispatchQueue error \(status)")))
             return
         }
         queue.asyncAfter(deadline: .now() + timeout) { [self] in
+            if !finished {
+                NetworkDNSUpstream.log.debug("query timed out: \(name) qtype \(type) after \(Int(timeout * 1000)) ms")
+            }
             finish(.failure(UpstreamError.timeout))
         }
     }
@@ -133,6 +155,7 @@ private final class QuerySession: @unchecked Sendable {
             case DNSServiceErrorType(kDNSServiceErr_NoSuchRecord):
                 apply(completion.negative(.noSuchRecord))
             default:
+                NetworkDNSUpstream.log.debug("dns_sd callback error \(errorCode) for \(name)")
                 finish(.failure(UpstreamError.connectionFailed("dns_sd error \(errorCode)")))
             }
             return
