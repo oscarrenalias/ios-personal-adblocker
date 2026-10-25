@@ -17,7 +17,7 @@ worth knowing.
 2. [x] [KI-2](#ki-2-lookups-with-large-answers-fail) Large DNS answers
 3. [ ] [KI-3](#ki-3-apple-relay-handling-is-switched-off-docs-say-otherwise) Apple relay: test on device, then fix code or docs
 4. [ ] [KI-4](#ki-4-tunnel-wakes-up-every-2-seconds) Battery: 2-second wake-ups
-5. [ ] [KI-5](#ki-5-background-list-refresh-probably-never-runs) Background refresh
+5. [x] [KI-5](#ki-5-background-list-refresh-probably-never-runs) Background refresh
 6. [ ] [KI-6](#ki-6-list-exceptions-cant-unblock-subdomains) List exceptions
 7. [ ] [KI-7](#ki-7-pause-and-unblock-take-up-to-5-minutes) Pause/unblock delay (small, fix alongside others)
 
@@ -133,7 +133,9 @@ react to events (app IPC messages, Darwin notifications) instead of polling.
 
 ### KI-5: Background list refresh probably never runs
 
-- **Status:** open, likely but not confirmed
+- **Status:** fixed by [`spec-27c7b48b`](../specs/planned/reliable-blocklist-updates.md) (`UIBackgroundModes` → `fetch` added to
+  Info.plist; scheduling and refresh outcomes are logged). Not yet confirmed
+  on a device.
 - **Where:** `ios/App/Info.plist`,
   `ios/IBlockerKit/Sources/IBlockerUI/System/ListRefreshScheduler.swift`
 
@@ -212,6 +214,9 @@ Swift 5 language mode, `SWIFT_STRICT_CONCURRENCY = minimal`, and several
 catch new concurrency mistakes.
 
 ### KI-14: `sources.json` has two uncoordinated writers
+
+- **Status:** fixed by [`spec-27c7b48b`](../specs/planned/reliable-blocklist-updates.md). All access goes through the
+  `FilterListStore` actor.
 
 The app (`FilterListsViewModel`) and the background refresh
 (`ListRefreshScheduler`) can both load, modify and save `sources.json`, with
