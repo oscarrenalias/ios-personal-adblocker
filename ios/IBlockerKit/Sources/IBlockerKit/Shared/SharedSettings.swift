@@ -74,12 +74,10 @@ public struct SharedSettings: @unchecked Sendable {
         self.defaults = defaults
     }
 
-    #if canImport(Darwin)
     public init?(groupID: String) {
         guard let defaults = UserDefaults(suiteName: groupID) else { return nil }
         self.init(defaults: defaults)
     }
-    #endif
 
     /// Written by the app at every launch. The tunnel can start before the
     /// first unlock, when the shared defaults are unreadable and every key

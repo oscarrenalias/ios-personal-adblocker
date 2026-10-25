@@ -9,7 +9,6 @@ public struct AppGroupPaths: Sendable {
         self.containerURL = containerURL
     }
 
-    #if canImport(Darwin)
     /// Resolves the real App Group container. The group ID is read from the
     /// bundle's `AppGroupID` Info.plist key by callers, so no target ever
     /// hardcodes it.
@@ -24,7 +23,6 @@ public struct AppGroupPaths: Sendable {
     public static func groupID(from bundle: Bundle) -> String? {
         bundle.object(forInfoDictionaryKey: "AppGroupID") as? String
     }
-    #endif
 
     public var blocklistURL: URL { containerURL.appendingPathComponent("blocklist.bin") }
     public var userAllowlistURL: URL { containerURL.appendingPathComponent("allowlist.bin") }
@@ -84,7 +82,6 @@ public struct AppGroupPaths: Sendable {
         loadMatcherReportingFailures(builtInBlockHashes: builtInBlockHashes).matcher
     }
 
-    #if canImport(Darwin)
     /// Removes data protection from existing compiled blobs so installs that
     /// wrote them protected are fixed without a recompile. Returns errors.
     @discardableResult
@@ -101,5 +98,4 @@ public struct AppGroupPaths: Sendable {
         }
         return failures
     }
-    #endif
 }

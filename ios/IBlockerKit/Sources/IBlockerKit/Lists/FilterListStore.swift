@@ -34,7 +34,6 @@ public actor FilterListStore {
         self.updater = FilterListUpdater(paths: paths, fetch: fetch)
     }
 
-    #if canImport(Darwin) || canImport(FoundationNetworking)
     /// Production store: downloads through `session`.
     public init(paths: AppGroupPaths,
                 compiler: @escaping Compiler = { state, paths in
@@ -45,7 +44,6 @@ public actor FilterListStore {
         self.compiler = compiler
         self.updater = FilterListUpdater(paths: paths, session: session)
     }
-    #endif
 
     /// Fetches, validates and saves every enabled list, then recompiles if
     /// anything changed. A call that arrives while a run is in progress

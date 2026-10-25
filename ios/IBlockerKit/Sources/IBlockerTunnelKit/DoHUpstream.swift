@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
 import IBlockerKit
 
 /// DNS-over-HTTPS upstream (RFC 8484 POST).

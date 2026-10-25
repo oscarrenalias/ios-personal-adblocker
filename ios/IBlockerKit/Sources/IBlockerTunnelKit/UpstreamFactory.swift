@@ -11,18 +11,13 @@ public enum UpstreamFactory {
         case .doh:
             return DoHUpstream(config: config)
         case .udp:
-            #if canImport(Network)
             guard let address = config.udpAddress, !address.isEmpty else { return nil }
             return UDPUpstream(address: address)
-            #else
-            return nil
-            #endif
         case .network:
             return nil
         }
     }
 
-    #if canImport(Darwin)
     /// Provider-aware entry point: routes `.network` to `NetworkDNSUpstream`
     /// using the injected physical-interface closure; other kinds are built
     /// exactly as in `make(_:)`.
@@ -35,5 +30,4 @@ public enum UpstreamFactory {
         }
         return make(config)
     }
-    #endif
 }

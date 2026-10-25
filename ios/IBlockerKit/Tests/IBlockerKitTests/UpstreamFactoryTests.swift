@@ -4,19 +4,16 @@ import IBlockerTunnelKit
 
 final class UpstreamFactoryTests: XCTestCase {
 
-#if canImport(Darwin)
     func testNetworkKindWithProviderYieldsNetworkDNSUpstream() {
         let upstream = UpstreamFactory.make(UpstreamConfig(kind: .network), interfaceIndex: { 4 })
         XCTAssertTrue(upstream is NetworkDNSUpstream)
     }
 
-#endif
 
     func testNetworkKindWithoutProviderIsNil() {
         XCTAssertNil(UpstreamFactory.make(UpstreamConfig(kind: .network)))
     }
 
-#if canImport(Darwin)
     func testNetworkUpstreamFailsWhenNoInterfaceKnown() async throws {
         let upstream = try XCTUnwrap(
             UpstreamFactory.make(UpstreamConfig(kind: .network), interfaceIndex: { nil }))
@@ -49,5 +46,4 @@ final class UpstreamFactoryTests: XCTestCase {
         XCTAssertTrue(udp is UDPUpstream)
         XCTAssertNil(UpstreamFactory.make(UpstreamConfig(kind: .udp), interfaceIndex: { nil }))
     }
-#endif
 }

@@ -35,11 +35,7 @@ public enum CompiledBlocklist {
     /// the tunnel, which iOS can start before the first unlock, can read them.
     /// The blobs hold only 64-bit hashes, never readable domains.
     public static var writingOptions: Data.WritingOptions {
-        #if canImport(Darwin)
         return [.atomic, .noFileProtection]
-        #else
-        return [.atomic]
-        #endif
     }
 
     /// Atomically writes the compiled blob so the tunnel never sees a
