@@ -18,10 +18,8 @@ from the logs alone.
   shows everything.
 - **Category:** the component, for example `tunnel`, `engine`, `upstream`,
   `network-dns`, `path`, `lists`, `settings`, `ui`.
-- `IBlockerKit` must still compile and test on Linux, where `os` isn't
-  available. Code there logs through a small wrapper in `IBlockerKit` that
-  uses `os.Logger` on Apple platforms and does nothing on Linux. The wrapper
-  is `Log` (`IBlockerKit/Shared/Log.swift`). Create one per component with
+- Log through the small `os.Logger` wrapper `Log`
+  (`IBlockerKit/Shared/Log.swift`). Create one per component with
   `Log(category: "engine")` and call `error`, `notice`, `info` or `debug`.
   Messages are logged `privacy: .public`.
 - Messages are autoclosures. Each level method checks

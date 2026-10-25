@@ -5,15 +5,6 @@ on:
   pull_request:
 
 jobs:
-  test-linux:
-    name: swift test (Linux)
-    runs-on: ubuntu-24.04
-    container: swift:6.1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run package tests
-        run: swift test --package-path ios/IBlockerKit
-
   test-macos:
     name: swift test (macOS)
     runs-on: macos-latest

@@ -1,4 +1,3 @@
-#if canImport(Darwin)
 import Foundation
 import Darwin
 import dnssd
@@ -199,4 +198,3 @@ private final class QuerySession: @unchecked Sendable {
         return out
     }
 }
-#endif

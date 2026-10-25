@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
 
 public struct FetchResult: Sendable {
     public var statusCode: Int
@@ -69,7 +66,6 @@ public struct FilterListUpdater: Sendable {
         self.fetch = fetch
     }
 
-    #if canImport(Darwin) || canImport(FoundationNetworking)
     /// Production fetcher backed by URLSession.
     public init(paths: AppGroupPaths, session: URLSession = .shared) {
         self.init(paths: paths) { request in
@@ -85,7 +81,6 @@ public struct FilterListUpdater: Sendable {
             )
         }
     }
-    #endif
 
     /// Fetches every enabled source, updating `state.metadata` and the
     /// cached list files. Does not recompile; call BlocklistCompiler after.

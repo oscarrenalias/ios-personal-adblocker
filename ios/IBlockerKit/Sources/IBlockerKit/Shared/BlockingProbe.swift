@@ -1,4 +1,3 @@
-#if canImport(Darwin)
 import Foundation
 import Darwin
 
@@ -62,4 +61,3 @@ public enum BlockingProbe {
         return blackholeOnly ? .blocked : .resolved(addresses)
     }
 }
-#endif

@@ -1,4 +1,3 @@
-#if canImport(os)
 import os
 import XCTest
 @testable import IBlockerKit
@@ -59,4 +58,3 @@ final class LogTests: XCTestCase {
         XCTAssertEqual(counter.value, 1)
     }
 }
-#endif

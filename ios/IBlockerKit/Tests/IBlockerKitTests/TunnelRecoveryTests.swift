@@ -48,9 +48,7 @@ final class TunnelRecoveryTests: XCTestCase {
     func testBlobWriteOptions() throws {
         let options = CompiledBlocklist.writingOptions
         XCTAssertTrue(options.contains(.atomic))
-        #if canImport(Darwin)
         XCTAssertTrue(options.contains(.noFileProtection))
-        #endif
     }
 
     func testSettingsSentinelDefaultsUnsetAndRoundTrips() {

@@ -1,4 +1,3 @@
-#if canImport(Network)
 import Foundation
 import Network
 import IBlockerKit
@@ -130,4 +129,3 @@ public actor UDPUpstream: DNSUpstream {
         }
     }
 }
-#endif
