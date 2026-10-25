@@ -25,6 +25,7 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
     private let policy: FallbackPolicy
     private let lock = NSLock()
     private var breaker: CircuitBreaker
+    private var lastStatus: ResolverStatus
 
     public init(
         network: DNSUpstream,
@@ -39,6 +40,26 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
             name: alternative?.name ?? "none",
             effect: policy == .networkDNS ? "using network DNS" : "queries fail"
         )
+        self.lastStatus = .network
+        lastStatus = lock.withLock { computeStatus() }
+    }
+
+    /// Current routing status: off -> network, healthy -> alternative,
+    /// down + network fallback -> fallingBack, down + no fallback -> failing.
+    public var status: ResolverStatus {
+        lock.withLock { computeStatus() }
+    }
+
+    /// The network changed: reset the breaker and probe the alternative right away.
+    /// No-op when the alternative is off.
+    public func networkChanged() {
+        guard let alternative else { return }
+        let probe: Int? = lock.withLock {
+            breaker.networkChange()
+            noteStatusChange()
+            return startProbeIfDue()
+        }
+        if let generation = probe { runProbe(alternative, generation: generation) }
     }
 
     public func resolve(_ query: Data) async throws -> Data {
@@ -65,6 +86,8 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
     private func resolveViaAlternative(_ query: Data, parsed: DNSQuery?, alternative: Alternative) async throws -> Data {
         let attempt: (healthy: Bool, generation: Int) = lock.withLock { (!breaker.isDown, breaker.generation) }
         guard attempt.healthy else {
+            let probe: Int? = lock.withLock { startProbeIfDue() }
+            if let generation = probe { runProbe(alternative, generation: generation) }
             Self.logRoute(parsed, rule: "failing")
             return try await fallBack(query, parsed: parsed, error: "alternative resolver marked down", elapsed: 0)
         }
@@ -75,14 +98,85 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
             let response = try await Self.withTimeout(Self.alternativeTimeout) {
                 try await alternative.upstream.resolve(query)
             }
-            lock.withLock { breaker.recordSuccess(generation: attempt.generation) }
+            lock.withLock {
+                breaker.recordSuccess(generation: attempt.generation)
+                noteStatusChange()
+            }
             return response
         } catch {
-            lock.withLock { breaker.recordFailure(generation: attempt.generation) }
+            lock.withLock {
+                breaker.recordFailure(generation: attempt.generation)
+                noteStatusChange()
+            }
             return try await fallBack(
                 query, parsed: parsed, error: "\(error)", elapsed: Date().timeIntervalSince(start)
             )
         }
+    }
+
+    /// Must be called with the lock held. Returns the generation to tag the probe with
+    /// when the breaker says a probe is due.
+    private func startProbeIfDue() -> Int? {
+        breaker.probeDue(Date()) ? breaker.generation : nil
+    }
+
+    /// Fire-and-forget probe: A apple.com, IN, RD, 2 s timeout; NOERROR is success.
+    private func runProbe(_ alternative: Alternative, generation: Int) {
+        let query = Self.probeQuery()
+        Task.detached { [self] in
+            do {
+                let response = try await Self.withTimeout(Self.alternativeTimeout) {
+                    try await alternative.upstream.resolve(query)
+                }
+                guard response.count >= 12, response[3] & 0x0F == 0 else {
+                    let rcode = response.count >= 4 ? Int(response[3] & 0x0F) : -1
+                    lock.withLock {
+                        breaker.probeFailed(generation: generation, error: "rcode \(rcode)")
+                        noteStatusChange()
+                    }
+                    return
+                }
+                lock.withLock {
+                    breaker.probeSucceeded(generation: generation)
+                    noteStatusChange()
+                }
+            } catch {
+                lock.withLock {
+                    breaker.probeFailed(generation: generation, error: "\(error)")
+                    noteStatusChange()
+                }
+            }
+        }
+    }
+
+    /// Must be called with the lock held.
+    private func computeStatus() -> ResolverStatus {
+        guard let alternative else { return .network }
+        if !breaker.isDown { return .alternative(name: alternative.name, encrypted: alternative.encrypted) }
+        return policy == .networkDNS ? .fallingBack(name: alternative.name) : .failing(name: alternative.name)
+    }
+
+    /// Must be called with the lock held. Logs when the status differs from the last one seen.
+    private func noteStatusChange() {
+        let new = computeStatus()
+        guard new != lastStatus else { return }
+        let old = lastStatus
+        lastStatus = new
+        Self.log.notice("resolver status \(old) -> \(new), encrypted \((alternative?.encrypted ?? false) ? "yes" : "no")")
+    }
+
+    private static func probeQuery() -> Data {
+        var bytes: [UInt8] = [
+            UInt8.random(in: 0...255), UInt8.random(in: 0...255),
+            0x01, 0x00,             // flags: RD
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]
+        for label in "apple.com".split(separator: ".") {
+            bytes.append(UInt8(label.utf8.count))
+            bytes.append(contentsOf: label.utf8)
+        }
+        bytes.append(contentsOf: [0x00, 0x00, 0x01, 0x00, 0x01]) // root, A, IN
+        return Data(bytes)
     }
 
     private func fallBack(_ query: Data, parsed: DNSQuery?, error: String, elapsed: TimeInterval) async throws -> Data {
