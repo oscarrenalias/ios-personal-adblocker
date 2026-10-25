@@ -6,7 +6,7 @@ import IBlockerKit
 public struct SettingsView: View {
     @Environment(TunnelController.self) private var tunnel
     @Environment(FilterListsViewModel.self) private var lists
-    @State private var upstream = AppEnvironment.settings.upstreamConfig
+    @State private var resolver = AppEnvironment.settings.resolverSettings
     @State private var logEnabled = AppEnvironment.settings.queryLogEnabled
     @State private var verboseLogging = AppEnvironment.settings.verboseLoggingUntil != nil
     @State private var relayStrategy = AppEnvironment.settings.relayStrategy
@@ -18,17 +18,6 @@ public struct SettingsView: View {
     private static let log = Log(category: "settings")
 
     public init() {}
-
-    /// Upstreams usable from inside the tunnel (IP-literal endpoints only —
-    /// hostname DoH would recurse through the tunnel's own resolver).
-    private static let upstreamChoices: [(name: String, config: UpstreamConfig)] = [
-        ("Network DNS (default)", UpstreamConfig(kind: .network)),
-        ("Cloudflare (DoH)", UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.1/dns-query")),
-        ("AdGuard DNS (DoH, extra blocking)", UpstreamConfig(kind: .doh, dohURL: "https://94.140.14.14/dns-query")),
-        ("Quad9 (DoH, malware blocking)", UpstreamConfig(kind: .doh, dohURL: "https://9.9.9.9:5053/dns-query")),
-        ("Cloudflare (UDP 53)", UpstreamConfig(kind: .udp, udpAddress: "1.1.1.1")),
-        ("Quad9 (UDP 53)", UpstreamConfig(kind: .udp, udpAddress: "9.9.9.9")),
-    ]
 
     public var body: some View {
         NavigationStack {
@@ -60,45 +49,48 @@ public struct SettingsView: View {
                 }
 
                 Section {
-                    ForEach(Self.upstreamChoices, id: \.name) { choice in
-                        HStack {
-                            Text(choice.name)
-                            Spacer()
-                            if upstream == choice.config {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.tint)
+                    Toggle("Use alternative DNS", isOn: useAlternativeBinding)
+                    if resolver.useAlternative {
+                        Picker("Provider", selection: presetBinding) {
+                            ForEach(UpstreamPreset.all) { preset in
+                                Text(preset.label).tag(preset.name)
+                            }
+                            if resolver.alternativeName == UpstreamPreset.customName {
+                                Text(UpstreamPreset.customName).tag(UpstreamPreset.customName)
                             }
                         }
-                        .contentShape(Rectangle())
-                        .onTapGesture { apply(choice.config) }
-                    }
-                    DisclosureGroup("Custom upstream") {
-                        HStack {
-                            TextField("https://10.0.0.1/dns-query", text: $customDoHURL)
-                                .keyboardType(.URL)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                            Button("Set DoH") {
-                                if let _ = URL(string: customDoHURL) {
-                                    apply(UpstreamConfig(kind: .doh, dohURL: customDoHURL))
+                        DisclosureGroup("Custom upstream") {
+                            HStack {
+                                TextField("https://10.0.0.1/dns-query", text: $customDoHURL)
+                                    .keyboardType(.URL)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                Button("Set DoH") {
+                                    if let _ = URL(string: customDoHURL) {
+                                        applyCustom(UpstreamConfig(kind: .doh, dohURL: customDoHURL))
+                                    }
                                 }
+                                .disabled(customDoHURL.isEmpty)
                             }
-                            .disabled(customDoHURL.isEmpty)
+                            HStack {
+                                TextField("9.9.9.11", text: $customUDPAddress)
+                                    .keyboardType(.numbersAndPunctuation)
+                                    .autocorrectionDisabled()
+                                Button("Set UDP") {
+                                    applyCustom(UpstreamConfig(kind: .udp, udpAddress: customUDPAddress))
+                                }
+                                .disabled(customUDPAddress.isEmpty)
+                            }
                         }
-                        HStack {
-                            TextField("9.9.9.11", text: $customUDPAddress)
-                                .keyboardType(.numbersAndPunctuation)
-                                .autocorrectionDisabled()
-                            Button("Set UDP") {
-                                apply(UpstreamConfig(kind: .udp, udpAddress: customUDPAddress))
-                            }
-                            .disabled(customUDPAddress.isEmpty)
+                        Picker("If the alternative is unreachable", selection: fallbackBinding) {
+                            Text("Use network DNS (unencrypted)").tag(FallbackPolicy.networkDNS)
+                            Text("Don't fall back (lookups fail)").tag(FallbackPolicy.none)
                         }
                     }
                 } header: {
                     Text("Upstream DNS (VPN mode)")
                 } footer: {
-                    Text("Where non-blocked queries are resolved. Network DNS uses the resolver of your current Wi-Fi or cellular connection. The other choices send lookups to a specific provider. Custom endpoints must be IP literals — hostnames can't be resolved from inside the tunnel.")
+                    Text("Network DNS is used when this is off, when the alternative is unreachable (if fallback is on), and always for local and carrier names. .local names are handled by your local network.")
                 }
 
                 Section {
@@ -238,10 +230,54 @@ public struct SettingsView: View {
         }
     }
 
-    private func apply(_ config: UpstreamConfig) {
-        upstream = config
-        AppEnvironment.settings.upstreamConfig = config
-        Task { await tunnel.setUpstream(config) }
+    private var useAlternativeBinding: Binding<Bool> {
+        Binding(
+            get: { resolver.useAlternative },
+            set: { on in
+                var updated = resolver
+                updated.useAlternative = on
+                apply(updated)
+            }
+        )
+    }
+
+    private var presetBinding: Binding<String> {
+        Binding(
+            get: { resolver.alternativeName },
+            set: { name in
+                guard let preset = UpstreamPreset.all.first(where: { $0.name == name }) else { return }
+                var updated = resolver
+                updated.alternative = preset.config
+                updated.alternativeName = preset.name
+                apply(updated)
+            }
+        )
+    }
+
+    private var fallbackBinding: Binding<FallbackPolicy> {
+        Binding(
+            get: { resolver.fallbackPolicy },
+            set: { policy in
+                var updated = resolver
+                updated.fallbackPolicy = policy
+                apply(updated)
+            }
+        )
+    }
+
+    private func applyCustom(_ config: UpstreamConfig) {
+        var updated = resolver
+        updated.alternative = config
+        updated.alternativeName = UpstreamPreset.name(for: config)
+        apply(updated)
+    }
+
+    /// Persists the settings and pushes them to the running tunnel.
+    private func apply(_ settings: ResolverSettings) {
+        resolver = settings
+        AppEnvironment.settings.resolverSettings = settings
+        Self.log.notice("resolver settings changed: alternative \(settings.useAlternative ? "on" : "off"), provider \(settings.alternativeName), fallback \(settings.fallbackPolicy.rawValue)")
+        Task { await tunnel.setResolverSettings(settings) }
     }
 
     private func refreshContentBlocker() {

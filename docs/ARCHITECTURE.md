@@ -35,8 +35,9 @@ Key decisions:
   interface index supplied by an `NWPathMonitor` in `PacketTunnelProvider`.
   The system resolver on that interface answers with whatever DNS the current
   Wi-Fi/cellular network hands out, and the result is rebuilt into a wire
-  response by `DNSResponseBuilder`. DoH and UDP upstreams remain as
-  user-selectable alternatives.
+  response by `DNSResponseBuilder`. DoH and UDP upstreams are available as an
+  optional alternative resolver (see
+  [Resolver router and failover](#resolver-router-and-failover)).
 - **No recursion**: interface-bound `DNSServiceQueryRecord` lookups leave via
   the physical interface and never re-enter the tunnel. The tunnel's own DNS
   addresses (`TunnelConstants.dnsIPv4`/`dnsIPv6`) are never used as the
@@ -53,6 +54,63 @@ Key decisions:
 - **TC never set** on synthesized answers → clients never retry over TCP →
   not serving TCP:53 is safe. With a DoH upstream, upstream
   truncation is impossible too.
+
+## Resolver router and failover
+
+`DNSProxyEngine` holds one `DNSUpstream` and doesn't know about failover. That
+upstream is a `ResolverRouter` (`Engine/ResolverRouter.swift`) wrapping the
+network upstream and the optional alternative. Blocking happens in the engine,
+before the router. Rules, in order:
+
+1. `local` and `*.local` (any type) get NXDOMAIN from
+   `DNSResponseBuilder.nxdomain(for:)`. Nothing is forwarded, no probe starts.
+   `.local` device names resolve over mDNS outside the tunnel, and answering
+   iOS's `SOA local` lookup at once avoids the 3 s Network DNS timeout (KI-15).
+   Networks that serve `.local` over unicast DNS (Active Directory) aren't
+   resolved through the tunnel.
+2. Alternative off: everything goes to network DNS.
+3. Network-only names (`NetworkOnlyNames`: `lan`, `home.arpa`, private reverse
+   zones, Wi-Fi calling and router setup names) always go to network DNS under
+   both policies and never trigger probes.
+4. Alternative on and healthy: ask the alternative with a 2 s timeout enforced
+   by the router. The deadline holds even if the upstream ignores task
+   cancellation: the router returns at 2 s and drops any late result. On
+   failure or timeout, count a failure and apply the
+   **fallback policy**: `.networkDNS` re-sends the same query to network DNS;
+   `.none` throws, so the engine answers SERVFAIL.
+5. Alternative down: skip it. `.networkDNS` goes to network DNS, `.none`
+   throws. If a probe is due, one starts in the background.
+
+**Circuit breaker** (`Engine/CircuitBreaker.swift`, injected clock). Three
+consecutive failures trip it to `down`. Probes (`A apple.com`, 2 s timeout,
+NOERROR is success) are allowed after 30 s, then the wait doubles per failed
+probe (60, 120, 240) up to 300 s. A successful probe returns to healthy, and
+the next trip starts at 30 s again. There are no timers: a probe only starts
+when a query that would have used the alternative arrives, or on a network
+change, so an idle phone isn't woken (KI-4). Each trip and reset bumps a
+generation counter, and results from older generations are ignored.
+
+The `resolver status old -> new` notice log reports `encrypted yes/no` from
+the new status itself (`.alternative(_, encrypted)`), not from the current
+alternative setting, so a transition to `networkDNS` or `down` logs `no`.
+
+**Network change.** `PacketTunnelProvider` calls `router.networkChanged()` only
+when the selected physical interface changes. The breaker resets to healthy and
+one probe runs at once; a single failed probe doesn't re-trip it.
+
+**Status.** `router.status` is a `ResolverStatus`: `network`,
+`alternative(name:encrypted:)`, `fallingBack(name:)` or `failing(name:)`.
+`getStats` copies it into `TunnelRuntimeStats.resolverStatus` (nil from older
+tunnels). Only DoH counts as encrypted (`UpstreamConfig.isEncrypted`).
+
+**Settings.** `ResolverSettings` (`useAlternative`, `alternative`,
+`alternativeName`, `fallbackPolicy`) is stored as JSON under `resolverSettings`
+in shared defaults. If it's missing, it's derived on read from the old
+`upstreamConfig` without writing (DoH/UDP becomes an enabled alternative with
+`.networkDNS`; missing or network becomes off). The app sends
+`setResolverSettings` over IPC and the tunnel rebuilds the router, which
+resets breaker state. Presets live in `UpstreamPreset`. At boot, until
+settings are readable, the router runs with defaults and is rebuilt on recovery.
 
 ## Memory (the 50 MB extension budget)
 
@@ -77,10 +135,10 @@ Everything shared lives in the App Group container:
 | `stats.json` | tunnel (2 s cadence) | app (fallback when tunnel unreachable) |
 | `sources.json` | app | app |
 | `contentblocker.json` | app | Safari extension |
-| shared `UserDefaults` | app | tunnel (upstream config, log toggle) |
+| shared `UserDefaults` | app | tunnel (resolver settings, log toggle) |
 
 Control channel: `sendProviderMessage` with JSON-coded `TunnelRequest`
-(`reloadRules`, `getStats`, `setUpstream`, `ping`). Fallback: the tunnel
+(`reloadRules`, `getStats`, `setResolverSettings`, `ping`). Fallback: the tunnel
 polls the blocklist generation number every 10 s, so rule updates land even
 if the app is killed before the IPC message.
 

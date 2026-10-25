@@ -27,6 +27,9 @@ public struct UpstreamConfig: Codable, Sendable, Equatable {
     /// interface (no fixed third-party resolver).
     public static let `default` = UpstreamConfig(kind: .network)
 
+    /// True only for DoH; UDP and network DNS are unencrypted.
+    public var isEncrypted: Bool { kind == .doh }
+
     public var displayName: String {
         switch kind {
         case .doh: return dohURL ?? "DoH"
@@ -41,7 +44,7 @@ public enum TunnelRequest: Codable, Sendable {
     case ping
     case reloadRules
     case getStats
-    case setUpstream(UpstreamConfig)
+    case setResolverSettings(ResolverSettings)
     /// Suspend blocking until the given instant; nil resumes.
     case setPause(until: Date?)
 }
@@ -54,15 +57,19 @@ public struct TunnelRuntimeStats: Codable, Sendable, Equatable {
     public var memoryBytes: UInt64?
     /// Non-nil when blocking is currently paused; the instant it resumes.
     public var pausedUntil: Date?
+    /// Resolver health as seen by the router; nil when reported by an older tunnel.
+    public var resolverStatus: ResolverStatus?
 
     public init(startedAt: Date? = nil, totalQueries: UInt64 = 0, blockedQueries: UInt64 = 0,
-                blocklistEntryCount: UInt64 = 0, memoryBytes: UInt64? = nil, pausedUntil: Date? = nil) {
+                blocklistEntryCount: UInt64 = 0, memoryBytes: UInt64? = nil, pausedUntil: Date? = nil,
+                resolverStatus: ResolverStatus? = nil) {
         self.startedAt = startedAt
         self.totalQueries = totalQueries
         self.blockedQueries = blockedQueries
         self.blocklistEntryCount = blocklistEntryCount
         self.memoryBytes = memoryBytes
         self.pausedUntil = pausedUntil
+        self.resolverStatus = resolverStatus
     }
 }
 

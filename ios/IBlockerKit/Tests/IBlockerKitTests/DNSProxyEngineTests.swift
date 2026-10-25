@@ -263,3 +263,46 @@ final class DNSProxyEngineTests: XCTestCase {
         _ = await first
     }
 }
+
+// MARK: - Engine with ResolverRouter
+
+final class DNSProxyEngineRouterTests: XCTestCase {
+    private final class Counter: DNSUpstream, @unchecked Sendable {
+        private let lock = NSLock()
+        private var n = 0
+        var calls: Int { lock.withLock { n } }
+        func resolve(_ query: Data) async throws -> Data {
+            lock.withLock { n += 1 }
+            throw UpstreamError.timeout
+        }
+    }
+
+    private func engine(router: ResolverRouter) throws -> (DNSProxyEngine, AppGroupPaths) {
+        let paths = AppGroupPaths(containerURL: try makeTempDirectory())
+        try paths.ensureDirectories()
+        try CompiledBlocklist.write(hashes: [FNV1a.hash64("ads.example.com")], generation: 1, to: paths.blocklistURL)
+        try CompiledBlocklist.write(hashes: [], generation: 1, to: paths.userAllowlistURL)
+        let engine = DNSProxyEngine(
+            matcher: paths.loadMatcher(), upstream: router,
+            logWriter: try QueryLogRingWriter(url: paths.queryLogURL, capacity: 64),
+            statsURL: paths.statsURL, configuration: .init())
+        return (engine, paths)
+    }
+
+    func testBlockedNamesNeverReachEitherUpstreamAndBothFailingGivesServfail() async throws {
+        let net = Counter(), alt = Counter()
+        let router = ResolverRouter(network: net, alternative: (alt, "Alt", true), policy: .networkDNS)
+        let (engine, _) = try engine(router: router)
+
+        let blocked = await engine.handlePacket(makeUDPPacketV4(payload: [UInt8](makeDNSQueryData(name: "ads.example.com"))))
+        XCTAssertNotNil(blocked)
+        XCTAssertEqual(net.calls + alt.calls, 0)
+
+        let reply = await engine.handlePacket(makeUDPPacketV4(payload: [UInt8](makeDNSQueryData(name: "example.com"))))
+        let udp = try XCTUnwrap(PacketParser.parseUDP(try XCTUnwrap(reply)))
+        let resp = try XCTUnwrap(MiniDNSResponse(Data(udp.payload)))
+        XCTAssertEqual(resp.rcode, 2)
+        XCTAssertEqual(alt.calls, 1)
+        XCTAssertEqual(net.calls, 1)
+    }
+}

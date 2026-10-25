@@ -14,6 +14,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private static let pathLog = Log(category: "path")
 
     private var engine: DNSProxyEngine?
+    /// Read from the path monitor queue (networkChanged) and written on
+    /// start / IPC / recovery, so it lives behind a lock.
+    private let routerBox = LockedBox<ResolverRouter?>(nil)
+    private var router: ResolverRouter? {
+        get { routerBox.withValue { $0 } }
+        set { routerBox.withValue { $0 = newValue } }
+    }
     private var paths: AppGroupPaths?
     private var maintenanceTask: Task<Void, Never>?
     private var pathMonitor: NWPathMonitor?
@@ -56,11 +63,32 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         return UpstreamFactory.make(config, interfaceIndex: { box.get() })
     }
 
+    /// Builds a router: network DNS plus the alternative when the toggle is on.
+    /// Returns nil (with an error log) when an upstream cannot be built.
+    private func makeRouter(_ settings: ResolverSettings, source: String) -> ResolverRouter? {
+        guard let network = makeUpstream(UpstreamConfig(kind: .network)) else {
+            Self.log.error("resolver settings not applied (source \(source)): network upstream could not be built")
+            return nil
+        }
+        var alternative: ResolverRouter.Alternative?
+        if settings.useAlternative {
+            guard let upstream = makeUpstream(settings.alternative) else {
+                Self.log.error("resolver settings not applied (source \(source)): alternative upstream could not be built, kind \(String(describing: settings.alternative.kind))")
+                return nil
+            }
+            alternative = (upstream, settings.alternativeName, settings.alternative.isEncrypted)
+        }
+        let router = ResolverRouter(network: network, alternative: alternative, policy: settings.fallbackPolicy)
+        Self.log.notice("resolver settings applied: source \(source), alternative \(settings.useAlternative ? "on" : "off"), name \(settings.alternativeName), url \(settings.alternative.displayName), policy \(settings.fallbackPolicy.rawValue)")
+        return router
+    }
+
     /// Tracks the first Wi-Fi / cellular / wired interface. `.other` is
     /// deliberately excluded: that is the tunnel's own utun.
     private func startPathMonitor() {
         pathMonitor?.cancel()
         let box = physicalInterface
+        let routerBox = routerBox
         let monitor = NWPathMonitor()
         // Only touched from the path monitor queue.
         var previous: String = "none"
@@ -73,6 +101,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if current != previous {
                 Self.pathLog.info("selected interface \(previous) → \(current), path status \(String(describing: path.status))")
                 previous = current
+                // Only a selected-interface change resets the router's
+                // network-DNS state (circuit breaker / probe).
+                routerBox.withValue { $0 }?.networkChanged()
             }
             if selected == nil {
                 let types = path.availableInterfaces.map { String(describing: $0.type) }.joined(separator: ", ")
@@ -98,10 +129,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         let settings = SharedSettings(groupID: groupID)
         let settingsReadable = settings?.settingsAvailable ?? false
-        let upstreamConfig = settings?.upstreamConfig ?? .default
+        // While settings are unreadable (before first unlock) start with
+        // defaults (alternative off); the recovery tick rebuilds the router.
+        let resolverSettings = settingsReadable ? (settings?.resolverSettings ?? .default) : .default
         startPathMonitor()
-        guard let upstream = makeUpstream(upstreamConfig) else {
-            Self.log.error("invalid upstream config at start: kind \(String(describing: upstreamConfig.kind)), reason: upstream could not be built")
+        guard let router = makeRouter(resolverSettings, source: "start") else {
             pathMonitor?.cancel()
             pathMonitor = nil
             throw NEVPNError(.configurationInvalid)
@@ -118,7 +150,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let startedAt = Date()
         let engine = DNSProxyEngine(
             matcher: matcher,
-            upstream: upstream,
+            upstream: router,
             logWriter: try? QueryLogRingWriter(url: paths.queryLogURL),
             statsURL: paths.statsURL,
             configuration: .init(logEnabled: settings?.queryLogEnabled ?? true)
@@ -126,6 +158,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         await engine.setPaused(until: settings?.pausedUntil)
         Self.applyVerbose(until: settings?.verboseLoggingUntil)
         self.engine = engine
+        self.router = router
 
         let networkSettings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         let relayStrategy = settings?.effectiveRelayStrategy ?? .blockDomains
@@ -175,7 +208,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         try await setTunnelNetworkSettings(networkSettings)
         settings?.protectionActive = true
 
-        Self.log.notice("tunnel up — \(matcher.blockedEntryCount) rules, upstream \(upstreamConfig.displayName), available memory \(os_proc_available_memory())")
+        Self.log.notice("tunnel up — \(matcher.blockedEntryCount) rules, resolver \(resolverSettings.useAlternative ? resolverSettings.alternativeName : "Network DNS"), available memory \(os_proc_available_memory())")
 
         startPacketLoop()
         startMaintenance(paths: paths, recovery: recovery, startedAt: startedAt)
@@ -195,11 +228,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             await engine.flush()
         }
         engine = nil
+        router = nil
     }
 
     override func handleAppMessage(_ messageData: Data) async -> Data? {
-        guard let engine,
-              let request = try? TunnelIPCCoder.decodeRequest(messageData) else { return nil }
+        guard let engine else { return nil }
+        let request: TunnelRequest
+        do {
+            request = try TunnelIPCCoder.decodeRequest(messageData)
+        } catch {
+            Self.log.error("IPC request not decoded (possibly setResolverSettings), reason: \(String(describing: error))")
+            return nil
+        }
 
         let response: TunnelResponse
         switch request {
@@ -216,16 +256,17 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         case .getStats:
             await engine.flush()
-            response = .stats(await engine.statsSnapshot(memoryBytes: UInt64(os_proc_available_memory())))
+            var stats = await engine.statsSnapshot(memoryBytes: UInt64(os_proc_available_memory()))
+            stats.resolverStatus = router?.status
+            response = .stats(stats)
 
-        case .setUpstream(let config):
-            if let upstream = makeUpstream(config) {
-                await engine.setUpstream(upstream)
-                Self.log.notice("setUpstream applied: \(config.displayName)")
+        case .setResolverSettings(let resolverSettings):
+            if let newRouter = makeRouter(resolverSettings, source: "ipc") {
+                await engine.setUpstream(newRouter)
+                router = newRouter
                 response = .ok
             } else {
-                Self.log.error("setUpstream failed: kind \(String(describing: config.kind)), reason: upstream could not be built")
-                response = .failure("invalid upstream config")
+                response = .failure("invalid resolver settings")
             }
 
         case .setPause(let until):
@@ -329,12 +370,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                                                 blocklistReadable: blocklistReadable)
                     var upstreamName = "unchanged"
                     if actions.reapplySettings, let settings {
-                        let config = settings.upstreamConfig
-                        if let upstream = self.makeUpstream(config) {
-                            await engine.setUpstream(upstream)
-                            upstreamName = config.displayName
-                        } else {
-                            Self.log.error("upstream re-apply failed after recovery: kind \(String(describing: config.kind)), reason: upstream could not be built")
+                        let resolverSettings = settings.resolverSettings
+                        if let newRouter = self.makeRouter(resolverSettings, source: "recovery") {
+                            await engine.setUpstream(newRouter)
+                            self.router = newRouter
+                            upstreamName = resolverSettings.useAlternative ? resolverSettings.alternativeName : "Network DNS"
                         }
                         await engine.setLogEnabled(settings.queryLogEnabled)
                         await engine.setPaused(until: settings.pausedUntil)
