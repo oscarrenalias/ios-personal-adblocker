@@ -73,7 +73,9 @@ before the router. Rules, in order:
    zones, Wi-Fi calling and router setup names) always go to network DNS under
    both policies and never trigger probes.
 4. Alternative on and healthy: ask the alternative with a 2 s timeout enforced
-   by the router. On failure or timeout, count a failure and apply the
+   by the router. The deadline holds even if the upstream ignores task
+   cancellation: the router returns at 2 s and drops any late result. On
+   failure or timeout, count a failure and apply the
    **fallback policy**: `.networkDNS` re-sends the same query to network DNS;
    `.none` throws, so the engine answers SERVFAIL.
 5. Alternative down: skip it. `.networkDNS` goes to network DNS, `.none`
@@ -87,6 +89,10 @@ the next trip starts at 30 s again. There are no timers: a probe only starts
 when a query that would have used the alternative arrives, or on a network
 change, so an idle phone isn't woken (KI-4). Each trip and reset bumps a
 generation counter, and results from older generations are ignored.
+
+The `resolver status old -> new` notice log reports `encrypted yes/no` from
+the new status itself (`.alternative(_, encrypted)`), not from the current
+alternative setting, so a transition to `networkDNS` or `down` logs `no`.
 
 **Network change.** `PacketTunnelProvider` calls `router.networkChanged()` only
 when the selected physical interface changes. The breaker resets to healthy and
