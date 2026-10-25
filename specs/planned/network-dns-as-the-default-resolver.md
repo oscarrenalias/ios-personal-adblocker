@@ -5,7 +5,7 @@ description: "Add a Network DNS upstream (DNSServiceQueryRecord bound to the phy
 dependencies: null
 priority: high
 complexity: null
-status: draft
+status: planned
 tags:
 - dns
 - tunnel
@@ -13,7 +13,7 @@ tags:
 scope:
   in: null
   out: null
-feature_root_id: null
+feature_root_id: B-2cfc79f4
 ---
 # Network DNS as the default resolver
 
