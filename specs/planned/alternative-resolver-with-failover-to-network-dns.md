@@ -5,7 +5,7 @@ description: "Tunnel side of KI-1 part 2: ResolverRouter with circuit breaker, f
 dependencies: null
 priority: high
 complexity: null
-status: draft
+status: planned
 tags:
 - dns
 - tunnel
@@ -13,7 +13,7 @@ tags:
 scope:
   in: null
   out: null
-feature_root_id: null
+feature_root_id: B-286f0852
 ---
 # Alternative resolver with failover to network DNS
 
