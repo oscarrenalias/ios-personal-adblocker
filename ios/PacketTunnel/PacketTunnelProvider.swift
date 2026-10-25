@@ -27,7 +27,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Rate-limits blob load error logs (once per distinct error per 60 s).
     private let errorLimiter = LockedBox(ErrorLogLimiter(interval: 60))
     private let physicalInterface = InterfaceIndexBox()
-    private let pathQueue = DispatchQueue(label: "com.iblocker.tunnel.path")
+    private let pathQueue = DispatchQueue(label: "net.renalias.adblocker.tunnel.path")
 
     /// Thread-safe holder for the current physical interface index, written
     /// from the path monitor queue and read from upstream resolves.

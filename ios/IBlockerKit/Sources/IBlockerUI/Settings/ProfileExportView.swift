@@ -79,7 +79,7 @@ struct ProfileExportView: View {
         do {
             let data = MobileConfigBuilder.profile(for: preset)
             let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("AdBlocker-\(preset.id).mobileconfig")
+                .appendingPathComponent("PersonalAdBlocker-\(preset.id).mobileconfig")
             try data.write(to: url, options: .atomic)
             exportedFileURL = url
             exportError = nil

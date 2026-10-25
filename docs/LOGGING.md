@@ -14,7 +14,7 @@ from the logs alone.
 ## API
 
 - Use Apple's unified logging (`os.Logger`). Don't use `print` or `NSLog`.
-- **Subsystem:** `com.iblocker`, the same for every target, so one filter
+- **Subsystem:** `net.renalias.adblocker`, the same for every target, so one filter
   shows everything.
 - **Category:** the component, for example `tunnel`, `engine`, `upstream`,
   `network-dns`, `path`, `lists`, `settings`, `ui`.
@@ -70,7 +70,7 @@ path changes) using the same wrapper.
 - **Console.app on the Mac:** connect the iPhone, select it in the sidebar,
   click **Start**, and turn on **Action ▸ Include Info Messages** and
   **Include Debug Messages**. In the search field, type
-  `subsystem:com.iblocker` and press Return to create a filter token. If
+  `subsystem:net.renalias.adblocker` and press Return to create a filter token. If
   needed, click the token's left part and choose **Subsystem**. Add more
   tokens (for example `category:network-dns`) to narrow it; tokens combine
   with AND. To see Subsystem and Category, right-click the column header and
@@ -80,7 +80,7 @@ path changes) using the same wrapper.
   Xcode. It then keeps logging with the old code, and messages from the new
   code won't appear.
 - **Nothing under the subsystem filter?** Filter on `process:PacketTunnel`
-  instead. If messages show there but not under `subsystem:com.iblocker`, the
+  instead. If messages show there but not under `subsystem:net.renalias.adblocker`, the
   running tunnel is an old build (see the previous point).
 - **Xcode:** messages from the app show in the debug console while running
   from Xcode. For the tunnel extension, use Console.app, since the extension
@@ -116,7 +116,7 @@ the device. Use the in-app switch instead:
    off after an hour. The tunnel picks the change up within about 2 s, with
    no restart.
 2. Stream in Console.app with **Action ▸ Include Info Messages** on and filter
-   on `subsystem:com.iblocker`.
+   on `subsystem:net.renalias.adblocker`.
 3. Look for lines prefixed `[verbose]`. These are the `debug` messages
    (per-query verdicts, network-dns query start/complete, upstream errors),
    emitted at `info` level while verbose mode is on.
