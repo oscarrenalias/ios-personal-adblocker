@@ -131,6 +131,10 @@ public struct SharedSettings: @unchecked Sendable {
         guard settings.alternative.kind == .doh,
               settings.alternative.dohURL == oldQuad9DoHURL else { return settings }
         var migrated = settings
+        if quad9Logged.claim() {
+            log.notice(
+                "replaced old Quad9 URL \(oldQuad9DoHURL) -> \(UpstreamPreset.quad9.config.dohURL ?? "")")
+        }
         migrated.alternative = UpstreamPreset.quad9.config
         migrated.alternativeName = UpstreamPreset.quad9.name
         return migrated
@@ -159,6 +163,7 @@ public struct SharedSettings: @unchecked Sendable {
     private static let log = Log(category: "settings")
     /// Reads happen on every tunnel tick; log the derivation once per process.
     private static let migrationLogged = OnceFlag()
+    private static let quad9Logged = OnceFlag()
 
     private final class OnceFlag: @unchecked Sendable {
         private let lock = NSLock()
