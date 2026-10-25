@@ -30,7 +30,7 @@ public actor DNSProxyEngine {
     private var upstream: DNSUpstream
     private let logWriter: QueryLogRingWriter?
     private let statsURL: URL?
-    private let configuration: Configuration
+    private var configuration: Configuration
     private var stats: BlockerStats
     private let startedAt = Date()
     private var inFlight = 0
@@ -157,6 +157,14 @@ public actor DNSProxyEngine {
     private var isPaused: Bool {
         guard let pausedUntil else { return false }
         return pausedUntil > Date()
+    }
+
+    public func setLogEnabled(_ enabled: Bool) {
+        configuration.logEnabled = enabled
+    }
+
+    public var blockedEntryCount: Int {
+        matcher.blockedEntryCount
     }
 
     public var blocklistGeneration: UInt32? {

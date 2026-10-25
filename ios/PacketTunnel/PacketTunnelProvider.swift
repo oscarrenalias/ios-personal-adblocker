@@ -17,6 +17,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var paths: AppGroupPaths?
     private var maintenanceTask: Task<Void, Never>?
     private var pathMonitor: NWPathMonitor?
+    /// Rate-limits blob load error logs (once per distinct error per 60 s).
+    private let errorLimiter = LockedBox(ErrorLogLimiter(interval: 60))
     private let physicalInterface = InterfaceIndexBox()
     private let pathQueue = DispatchQueue(label: "com.iblocker.tunnel.path")
 
@@ -34,6 +36,16 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         func set(_ newValue: UInt32?) {
             lock.lock(); defer { lock.unlock() }
             value = newValue
+        }
+    }
+
+    private final class LockedBox<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: T
+        init(_ value: T) { self.value = value }
+        func withValue<R>(_ body: (inout T) -> R) -> R {
+            lock.lock(); defer { lock.unlock() }
+            return body(&value)
         }
     }
 
@@ -85,6 +97,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         try? paths.ensureDirectories()
 
         let settings = SharedSettings(groupID: groupID)
+        let settingsReadable = settings?.settingsAvailable ?? false
         let upstreamConfig = settings?.upstreamConfig ?? .default
         startPathMonitor()
         guard let upstream = makeUpstream(upstreamConfig) else {
@@ -94,7 +107,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             throw NEVPNError(.configurationInvalid)
         }
 
-        let matcher = Self.currentMatcher(paths: paths)
+        let (matcher, blobFailures) = currentMatcher(paths: paths)
+        let recovery = TunnelRecovery(settingsReadable: settingsReadable, blocklistLoaded: blobFailures.isEmpty)
+        if recovery.isDegraded {
+            var unavailable: [String] = []
+            if recovery.settingsPending { unavailable.append("settings") }
+            if recovery.blocklistPending { unavailable.append("blocklist (\(blobFailures.map(\.fileName).joined(separator: ", ")))") }
+            Self.log.notice("starting degraded, unavailable: \(unavailable.joined(separator: ", ")); will retry every 2 s")
+        }
+        let startedAt = Date()
         let engine = DNSProxyEngine(
             matcher: matcher,
             upstream: upstream,
@@ -157,7 +178,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         Self.log.notice("tunnel up — \(matcher.blockedEntryCount) rules, upstream \(upstreamConfig.displayName), available memory \(os_proc_available_memory())")
 
         startPacketLoop()
-        startMaintenance(paths: paths)
+        startMaintenance(paths: paths, recovery: recovery, startedAt: startedAt)
     }
 
     override func stopTunnel(with reason: NEProviderStopReason) async {
@@ -187,7 +208,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         case .reloadRules:
             if let paths {
-                await engine.reload(matcher: Self.currentMatcher(paths: paths))
+                await engine.reload(matcher: currentMatcher(paths: paths).matcher)
                 response = .ok
             } else {
                 response = .failure("no app group container")
@@ -222,9 +243,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// every bundled source the user has left enabled — so the guaranteed
     /// floor (in-app Google ads, Apple tracker-relay bypass) holds even when
     /// the compiled blob is missing or stale.
-    private static func currentMatcher(paths: AppGroupPaths) -> DomainMatcher {
+    /// Blob load failures are logged at error level (rate limited) and
+    /// returned so callers can track degraded state.
+    private func currentMatcher(paths: AppGroupPaths) -> (matcher: DomainMatcher, failures: [AppGroupPaths.BlobLoadFailure]) {
         let state = FilterListState.load(from: paths.filterStateURL)
-        return paths.loadMatcher(builtInBlockHashes: SeedRules.fallbackHashes(state: state))
+        let result = paths.loadMatcherReportingFailures(builtInBlockHashes: SeedRules.fallbackHashes(state: state))
+        for failure in result.failures {
+            let key = "\(failure.fileName): \(failure.error)"
+            if errorLimiter.withValue({ $0.shouldLog(key) }) {
+                Self.log.error("blocklist load failed: \(failure.fileName), error: \(failure.error)")
+            }
+        }
+        return result
     }
 
     // MARK: - Packet loop
@@ -262,30 +292,83 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     /// Flushes the log/stats every 2 s and picks up recompiled blocklists
     /// even if the app's reload IPC never arrives (e.g. app was killed).
-    private func startMaintenance(paths: AppGroupPaths) {
+    /// While degraded (started before first unlock) it also retries the
+    /// unreadable settings and blobs on every tick.
+    private func startMaintenance(paths: AppGroupPaths, recovery initial: TunnelRecovery, startedAt: Date) {
         let groupID = AppGroupPaths.groupID(from: Bundle.main)
         maintenanceTask = Task { [weak self] in
             var tick: UInt64 = 0
+            var recovery = initial
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 guard let self, let engine = self.engine else { return }
                 await engine.flush()
 
+                let settings = groupID.flatMap { SharedSettings(groupID: $0) }
+                let settingsReadable = settings?.settingsAvailable ?? false
+
                 // Re-read the pause deadline so a pause set by the widget or
                 // an App Intent (which can't reach the tunnel over IPC)
                 // propagates within one tick.
-                if let groupID, let settings = SharedSettings(groupID: groupID) {
+                if let settings, settingsReadable || !recovery.settingsPending {
                     await engine.setPaused(until: settings.pausedUntil)
                     Self.applyVerbose(until: settings.verboseLoggingUntil)
                 }
 
+                var reloaded: DomainMatcher?
+                if recovery.isDegraded {
+                    var blocklistReadable = false
+                    if recovery.blocklistPending {
+                        let result = self.currentMatcher(paths: paths)
+                        if result.failures.isEmpty {
+                            blocklistReadable = true
+                            reloaded = result.matcher
+                        }
+                    }
+                    let actions = recovery.tick(settingsReadable: settingsReadable,
+                                                blocklistReadable: blocklistReadable)
+                    var upstreamName = "unchanged"
+                    if actions.reapplySettings, let settings {
+                        let config = settings.upstreamConfig
+                        if let upstream = self.makeUpstream(config) {
+                            await engine.setUpstream(upstream)
+                            upstreamName = config.displayName
+                        } else {
+                            Self.log.error("upstream re-apply failed after recovery: kind \(String(describing: config.kind)), reason: upstream could not be built")
+                        }
+                        await engine.setLogEnabled(settings.queryLogEnabled)
+                        await engine.setPaused(until: settings.pausedUntil)
+                        Self.applyVerbose(until: settings.verboseLoggingUntil)
+                    }
+                    if let matcher = reloaded {
+                        await engine.reload(matcher: matcher)
+                        Self.log.info("blocklist reloaded: \(matcher.blockedEntryCount) rules, generation \(matcher.blocklist?.generation.description ?? "none")")
+                    }
+                    if !recovery.isDegraded {
+                        let elapsed = Int(Date().timeIntervalSince(startedAt))
+                        let rules = await engine.blockedEntryCount
+                        Self.log.notice("recovered after \(elapsed) s: \(rules) rules, upstream \(upstreamName)")
+                    }
+                }
+
                 tick += 1
-                if tick % 5 == 0 {
+                if tick % 5 == 0, reloaded == nil, !recovery.blocklistPending {
                     let current = await engine.blocklistGeneration
-                    if let onDisk = try? CompiledBlocklistView(contentsOf: paths.blocklistURL),
-                       onDisk.generation != current {
-                        Self.log.info("blocklist generation changed → reloading rules")
-                        await engine.reload(matcher: Self.currentMatcher(paths: paths))
+                    do {
+                        let onDisk = try CompiledBlocklistView(contentsOf: paths.blocklistURL)
+                        if onDisk.generation != current {
+                            let matcher = self.currentMatcher(paths: paths).matcher
+                            await engine.reload(matcher: matcher)
+                            Self.log.info("blocklist reloaded: \(matcher.blockedEntryCount) rules, generation \(onDisk.generation)")
+                        }
+                    } catch {
+                        // A missing file is normal before the first compile.
+                        if FileManager.default.fileExists(atPath: paths.blocklistURL.path) {
+                            let key = "\(paths.blocklistURL.lastPathComponent): \(String(describing: error))"
+                            if self.errorLimiter.withValue({ $0.shouldLog(key) }) {
+                                Self.log.error("blocklist load failed: \(paths.blocklistURL.lastPathComponent), error: \(String(describing: error))")
+                            }
+                        }
                     }
                 }
             }

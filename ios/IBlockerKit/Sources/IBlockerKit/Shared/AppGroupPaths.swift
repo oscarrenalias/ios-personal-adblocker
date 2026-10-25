@@ -44,16 +44,62 @@ public struct AppGroupPaths: Sendable {
                                                 withIntermediateDirectories: true)
     }
 
+    /// A compiled blob that exists on disk but could not be loaded (for
+    /// example because data protection hides it before first unlock).
+    public struct BlobLoadFailure: Sendable {
+        public let fileName: String
+        public let error: String
+    }
+
+    private func loadBlob(_ url: URL, failures: inout [BlobLoadFailure]) -> CompiledBlocklistView? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        do {
+            return try CompiledBlocklistView(contentsOf: url)
+        } catch {
+            failures.append(BlobLoadFailure(fileName: url.lastPathComponent, error: String(describing: error)))
+            return nil
+        }
+    }
+
+    /// Like `loadMatcher`, but also reports every blob that exists yet failed
+    /// to load. Missing files are not failures.
+    public func loadMatcherReportingFailures(
+        builtInBlockHashes: Set<UInt64> = []
+    ) -> (matcher: DomainMatcher, failures: [BlobLoadFailure]) {
+        var failures: [BlobLoadFailure] = []
+        let matcher = DomainMatcher(
+            blocklist: loadBlob(blocklistURL, failures: &failures),
+            userAllowlist: loadBlob(userAllowlistURL, failures: &failures),
+            userDenylist: loadBlob(userDenylistURL, failures: &failures),
+            builtInBlockHashes: builtInBlockHashes
+        )
+        return (matcher, failures)
+    }
+
     /// Loads the current matcher from disk; missing files yield an empty
     /// matcher rather than an error so the tunnel can start before the first
     /// list download completes. Pass `builtInBlockHashes` (the seed
     /// fallback) so blocking never depends solely on the on-disk blob.
     public func loadMatcher(builtInBlockHashes: Set<UInt64> = []) -> DomainMatcher {
-        DomainMatcher(
-            blocklist: try? CompiledBlocklistView(contentsOf: blocklistURL),
-            userAllowlist: try? CompiledBlocklistView(contentsOf: userAllowlistURL),
-            userDenylist: try? CompiledBlocklistView(contentsOf: userDenylistURL),
-            builtInBlockHashes: builtInBlockHashes
-        )
+        loadMatcherReportingFailures(builtInBlockHashes: builtInBlockHashes).matcher
     }
+
+    #if canImport(Darwin)
+    /// Removes data protection from existing compiled blobs so installs that
+    /// wrote them protected are fixed without a recompile. Returns errors.
+    @discardableResult
+    public func relaxBlobProtection() -> [BlobLoadFailure] {
+        var failures: [BlobLoadFailure] = []
+        for url in [blocklistURL, userAllowlistURL, userDenylistURL]
+        where FileManager.default.fileExists(atPath: url.path) {
+            do {
+                try FileManager.default.setAttributes([.protectionKey: FileProtectionType.none],
+                                                      ofItemAtPath: url.path)
+            } catch {
+                failures.append(BlobLoadFailure(fileName: url.lastPathComponent, error: String(describing: error)))
+            }
+        }
+        return failures
+    }
+    #endif
 }
