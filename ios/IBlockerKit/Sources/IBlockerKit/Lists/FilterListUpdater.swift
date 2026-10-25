@@ -22,6 +22,8 @@ public struct UpdateSummary: Sendable, Equatable {
     public var unchangedSourceIDs: [String] = []
     /// Downloaded fine but failed validation; the previous list stays in use.
     public var rejectedSourceIDs: [String] = []
+    /// Why each rejected source was rejected, keyed by source id.
+    public var rejectedReasons: [String: String] = [:]
     public var failedSourceIDs: [String: String] = [:]
 
     public var anyChanged: Bool { !updatedSourceIDs.isEmpty }
@@ -87,11 +89,14 @@ public struct FilterListUpdater: Sendable {
 
     /// Fetches every enabled source, updating `state.metadata` and the
     /// cached list files. Does not recompile; call BlocklistCompiler after.
-    public func update(state: inout FilterListState, force: Bool = false) async -> UpdateSummary {
+    /// With `onlySourceIDs`, every other source is skipped.
+    public func update(state: inout FilterListState, force: Bool = false,
+                       onlySourceIDs: Set<String>? = nil) async -> UpdateSummary {
         var summary = UpdateSummary()
         try? paths.ensureDirectories()
 
         for source in state.sources where source.enabled {
+            if let only = onlySourceIDs, !only.contains(source.id) { continue }
             // Bundled rulesets ship in the binary — nothing to fetch.
             if SeedRules.bundledText(for: source.id) != nil { continue }
             // A hidden source must not download either: its failures would be
@@ -132,6 +137,7 @@ public struct FilterListUpdater: Sendable {
                         metadata.lastChecked = now
                         log.notice("list \(source.id) rejected: \(reason) (new \(FilterListParser.parse(text).blockDomains.count), previous \(Self.countDescription(previousCount)))")
                         summary.rejectedSourceIDs.append(source.id)
+                        summary.rejectedReasons[source.id] = reason
                     case .accept(let entryCount):
                         try replace(destination, with: temp)
                         metadata.etag = result.etag
