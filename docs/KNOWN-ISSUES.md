@@ -133,7 +133,7 @@ react to events (app IPC messages, Darwin notifications) instead of polling.
 
 ### KI-5: Background list refresh probably never runs
 
-- **Status:** fixed by [`spec-27c7b48b`](../specs/planned/reliable-blocklist-updates.md) (`UIBackgroundModes` → `fetch` added to
+- **Status:** fixed by [`spec-27c7b48b`](../specs/done/reliable-blocklist-updates.md) (`UIBackgroundModes` → `fetch` added to
   Info.plist; scheduling and refresh outcomes are logged). Not yet confirmed
   on a device.
 - **Where:** `ios/App/Info.plist`,
@@ -215,7 +215,7 @@ catch new concurrency mistakes.
 
 ### KI-14: `sources.json` has two uncoordinated writers
 
-- **Status:** fixed by [`spec-27c7b48b`](../specs/planned/reliable-blocklist-updates.md). All access goes through the
+- **Status:** fixed by [`spec-27c7b48b`](../specs/done/reliable-blocklist-updates.md). All access goes through the
   `FilterListStore` actor.
 
 The app (`FilterListsViewModel`) and the background refresh

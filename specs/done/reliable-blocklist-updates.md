@@ -5,7 +5,7 @@ description: "Validate list downloads before replacing (keep last good), single 
 dependencies: null
 priority: high
 complexity: null
-status: planned
+status: done
 tags:
 - lists
 - reliability
