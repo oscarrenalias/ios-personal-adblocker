@@ -17,6 +17,11 @@ One clear sentence describing the goal.
 ## Scope
 What is explicitly in scope and out of scope.
 
+## Logging
+Required for any change to app or extension code. Link docs/LOGGING.md and list
+the events the change must log, with their levels (error / notice / info / debug).
+Include an acceptance criterion that these are logged.
+
 ## Files to Add/Modify (optional)
 Hints about which files will change. Helps the planner assign expected_files.
 ```
@@ -29,6 +34,9 @@ Hints about which files will change. Helps the planner assign expected_files.
   risk scope creep and merge conflicts.
 - **Don't prescribe implementation.** Say what the feature does, not how to build it.
   The developer agent decides the implementation.
+- **Specify logging.** Every app/extension change lists the events to log, per
+  [docs/LOGGING.md](../docs/LOGGING.md). Logs are how we trace problems on a
+  device, so "add logging" is not enough: name the events and levels.
 - **Hint at file scope.** If you know the change touches `src/foo/bar.py`, say so.
   The planner uses this to avoid scheduling conflicts.
 

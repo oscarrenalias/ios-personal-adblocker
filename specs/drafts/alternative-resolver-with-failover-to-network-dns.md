@@ -241,6 +241,25 @@ the single upstream picker with:
 
 `DNSProxyEngine.swift` should not need changes.
 
+## Logging
+
+Follow [docs/LOGGING.md](../../docs/LOGGING.md): subsystem `com.iblocker`, and
+the Linux-safe wrapper in `IBlockerKit`, which is created here if it doesn't
+exist yet. Categories: `router` (router and breaker), `settings`, `tunnel`.
+
+| Event | Level | Details to include |
+|---|---|---|
+| Breaker trips (healthy → down) | `notice` | alternative name, failure count, backoff |
+| Breaker recovers (down → healthy) | `notice` | alternative name, how long it was down |
+| Probe started / succeeded / failed | `info` | alternative name, duration, error on failure, next probe time |
+| Network change resets the breaker | `info` | old → new interface name |
+| Resolver settings applied (IPC or start) | `notice` | toggle on/off, alternative name and URL |
+| Migration from old `upstreamConfig` | `notice` | old kind → new settings (no domains) |
+| Query failed on alternative, re-sent to network | `debug` | domain, qtype, error, elapsed ms |
+| Routing decision per query | `debug` | domain, qtype, target (alternative / network / network-only name) |
+| Both upstreams failed (SERVFAIL) | `error` | qtype, both errors; domain only in a separate `debug` line |
+| IPC `setResolverSettings` can't be applied or decoded | `error` | reason |
+
 ## Acceptance Criteria
 
 Automated (`swift test --package-path ios/IBlockerKit`, with fake upstreams
@@ -276,20 +295,27 @@ and an injected clock):
     `TunnelIPCCoder`.
 13. All existing tests pass.
 
+Code review:
+
+14. Every event in the Logging table is logged at the stated level through
+    `os.Logger` (or the `IBlockerKit` wrapper) with subsystem `com.iblocker`.
+    Domain names appear only in `debug` messages. `IBlockerKit` still builds
+    and tests on Linux.
+
 Build:
 
-14. `cd ios && xcodegen generate && xcodebuild build -project IBlocker.xcodeproj -scheme IBlocker -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO`
+15. `cd ios && xcodegen generate && xcodebuild build -project IBlocker.xcodeproj -scheme IBlocker -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO`
     succeeds.
 
 On device (manual, by the user):
 
-15. With the alternative off, the Dashboard shows "Network DNS".
-16. With the alternative set to Cloudflare, the Dashboard shows "Cloudflare".
-17. With a custom DoH URL `https://192.0.2.1/dns-query` (unreachable),
+16. With the alternative off, the Dashboard shows "Network DNS".
+17. With the alternative set to Cloudflare, the Dashboard shows "Cloudflare".
+18. With a custom DoH URL `https://192.0.2.1/dns-query` (unreachable),
     browsing still works. After a few lookups, the Dashboard shows "Network
     DNS — Custom unreachable, retrying". After switching to Cloudflare it
     shows "Cloudflare".
-18. A router admin page (e.g. `fritz.box` on a Fritz!Box network) or a
+19. A router admin page (e.g. `fritz.box` on a Fritz!Box network) or a
     `.local` name resolves with the alternative on.
 
 ## Scope
