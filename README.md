@@ -83,7 +83,7 @@ Steps:
    [`ios/project.yml`](ios/project.yml):
    ```yaml
    DEVELOPMENT_TEAM: QEZ63CXN26
-   BUNDLE_ID_PREFIX: com.renalias
+   BUNDLE_ID_PREFIX: net.renalias
    ```
 2. Generate the Xcode project and open it:
    ```bash
@@ -95,13 +95,18 @@ Steps:
    `xcodegen generate` again after you change `project.yml` or add files.
    Don't change build settings in Xcode itself, because the next generate
    overwrites them.
-3. Choose the **IBlocker** scheme and your device, then press **Run**. On the
+3. Choose the **IBlocker** scheme (the app itself is named **Personal AdBlocker**) and your device, then press **Run**. On the
    first build, Xcode registers the app IDs, the App Group, and the VPN
    permission with your account.
 4. On the phone, follow the setup screens. Tap **Enable protection** and
    allow the VPN when iOS asks.
 
 More signing details are in [docs/SIGNING.md](docs/SIGNING.md).
+
+**Upgrading from an earlier build:** the bundle IDs, App Group and app name
+changed (now `net.renalias.adblocker`, shown as Personal AdBlocker). Delete
+the old app from the device first, install the new one and go through setup
+again, then re-add any widgets to the Home Screen.
 
 ## Check that it works
 

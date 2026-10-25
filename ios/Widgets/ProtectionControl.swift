@@ -21,7 +21,7 @@ struct ProtectionControl: ControlWidget {
             }
             .tint(.green)
         }
-        .displayName("AdBlocker")
+        .displayName("Personal AdBlocker")
         .description("Turn ad blocking on or off.")
     }
 

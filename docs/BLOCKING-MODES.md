@@ -1,6 +1,6 @@
 # Blocking modes and how they interact
 
-IBlocker gives you three independent ways to block ads, plus a Safari
+Personal AdBlocker gives you three independent ways to block ads, plus a Safari
 cosmetic layer. They can coexist; iOS picks the resolver by fixed precedence.
 
 ## 1. VPN mode (the main one)
@@ -43,7 +43,7 @@ Management ▸ DNS.
 active VPN tunnel DNS  >  DNS profile / NEDNSSettings  >  network's DHCP DNS
 ```
 
-So: while IBlocker's VPN is connected, its filtering wins. The moment the
+So: while the app's VPN is connected, its filtering wins. The moment the
 VPN is off (you toggled it, or iOS killed it), an installed profile takes
 over automatically. Running mode 1 + mode 2 together is the recommended
 belt-and-suspenders setup — there is never a moment with unfiltered DNS.
@@ -53,7 +53,7 @@ belt-and-suspenders setup — there is never a moment with unfiltered DNS.
 DNS blocking stops requests, but pages sometimes keep empty ad frames or
 "ad blocker detected" leftovers. The Safari extension applies EasyList's
 element-hiding rules (the supported subset) inside Safari. Enable it in
-Settings ▸ Apps ▸ Safari ▸ Extensions, refresh its rules from IBlocker's
+Settings ▸ Apps ▸ Safari ▸ Extensions, refresh its rules from Personal AdBlocker's
 Settings tab.
 
 ## The Apple tracker-relay leak (and why we block it)

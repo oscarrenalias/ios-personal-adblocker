@@ -94,8 +94,16 @@ public final class TunnelController {
         syncStatus()
     }
 
+    private static let configurationName = "Personal AdBlocker"
+
     private func ensureManager() async throws -> NETunnelProviderManager {
-        if let manager { return manager }
+        if let manager {
+            // Renamed on the next save so iOS Settings shows the current name.
+            if manager.localizedDescription != Self.configurationName {
+                manager.localizedDescription = Self.configurationName
+            }
+            return manager
+        }
         let managers = try await NETunnelProviderManager.loadAllFromPreferences()
         let manager = managers.first ?? NETunnelProviderManager()
 
@@ -103,7 +111,7 @@ public final class TunnelController {
         proto.providerBundleIdentifier = AppEnvironment.tunnelBundleID
         proto.serverAddress = TunnelConstants.serverDescription
         manager.protocolConfiguration = proto
-        manager.localizedDescription = "AdBlocker"
+        manager.localizedDescription = Self.configurationName
         manager.onDemandRules = [NEOnDemandRuleConnect()]
 
         self.manager = manager

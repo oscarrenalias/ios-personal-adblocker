@@ -6,7 +6,7 @@ import IBlockerKit
 /// file hardcodes the App Group or bundle identifiers.
 public enum AppEnvironment {
     public static var groupID: String {
-        AppGroupPaths.groupID(from: .main) ?? "group.invalid.iblocker"
+        AppGroupPaths.groupID(from: .main) ?? "group.invalid.adblocker"
     }
 
     public static var paths: AppGroupPaths {
@@ -19,15 +19,15 @@ public enum AppEnvironment {
     }
 
     public static var refreshTaskID: String {
-        (Bundle.main.bundleIdentifier ?? "iblocker") + ".refresh"
+        (Bundle.main.bundleIdentifier ?? "net.renalias.adblocker") + ".refresh"
     }
 
     public static var tunnelBundleID: String {
-        (Bundle.main.bundleIdentifier ?? "iblocker") + ".tunnel"
+        (Bundle.main.bundleIdentifier ?? "net.renalias.adblocker") + ".tunnel"
     }
 
     public static var contentBlockerBundleID: String {
-        (Bundle.main.bundleIdentifier ?? "iblocker") + ".blocker"
+        (Bundle.main.bundleIdentifier ?? "net.renalias.adblocker") + ".blocker"
     }
 }
 #endif

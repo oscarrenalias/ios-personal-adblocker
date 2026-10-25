@@ -6,7 +6,7 @@ Edit the project-level `settings.base` in `ios/project.yml`:
 
 ```yaml
 DEVELOPMENT_TEAM: ABCDE12345      # Team ID from developer.apple.com → Membership
-BUNDLE_ID_PREFIX: com.yourname
+BUNDLE_ID_PREFIX: net.yourname
 ```
 
 Then `cd ios && xcodegen generate`, open `ios/IBlocker.xcodeproj`, select
@@ -19,11 +19,11 @@ are lost.
 
 | Thing | Value |
 |---|---|
-| App bundle ID | `$(BUNDLE_ID_PREFIX).iblocker` |
-| Tunnel extension | `$(BUNDLE_ID_PREFIX).iblocker.tunnel` |
-| Safari blocker | `$(BUNDLE_ID_PREFIX).iblocker.blocker` |
-| Widgets | `$(BUNDLE_ID_PREFIX).iblocker.widgets` |
-| App Group | `group.$(BUNDLE_ID_PREFIX).iblocker` |
+| App bundle ID | `$(BUNDLE_ID_PREFIX).adblocker` |
+| Tunnel extension | `$(BUNDLE_ID_PREFIX).adblocker.tunnel` |
+| Safari blocker | `$(BUNDLE_ID_PREFIX).adblocker.blocker` |
+| Widgets | `$(BUNDLE_ID_PREFIX).adblocker.widgets` |
+| App Group | `group.$(BUNDLE_ID_PREFIX).adblocker` |
 
 Extension IDs are prefixed by the app ID (an Apple requirement for embedded
 extensions). The App Group is stamped into each target's Info.plist as
@@ -46,6 +46,10 @@ targets.
   `xcodebuild -allowProvisioningUpdates` makes Xcode fetch fresh profiles.
   Don't fix signing in Xcode's Signing & Capabilities tab — the next
   `xcodegen generate` discards those changes.
+- **Upgrading from an earlier build with the old IDs**: the IDs,
+  App Group and app name (now Personal AdBlocker) all changed, so the new
+  build is a different app. Delete the old app first, run the setup again,
+  and re-add the widgets.
 - **App Group mismatch**: if you change `BUNDLE_ID_PREFIX` after a first
   install, delete the app from the device (the old VPN configuration
   references the old bundle ID) and reinstall.

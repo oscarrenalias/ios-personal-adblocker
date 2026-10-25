@@ -99,7 +99,7 @@ private struct SourceRow: View {
                         Text("\(metadata.entryCount.formatted()) rules")
                     }
                     if let fetched = metadata.lastFetched {
-                        Text("updated \(fetched, style: .relative) ago")
+                        Text(ListAgeText.updated(since: fetched, now: Date()))
                     }
                 }
                 .font(.caption2)
