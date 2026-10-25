@@ -68,8 +68,20 @@ path changes) using the same wrapper.
 ## Reading the logs
 
 - **Console.app on the Mac:** connect the iPhone, select it in the sidebar,
-  turn on **Action ▸ Include Info Messages** and **Include Debug Messages**,
-  then filter on `subsystem:com.iblocker`. Narrow it with `category:`.
+  click **Start**, and turn on **Action ▸ Include Info Messages** and
+  **Include Debug Messages**. In the search field, type
+  `subsystem:com.iblocker` and press Return to create a filter token. If
+  needed, click the token's left part and choose **Subsystem**. Add more
+  tokens (for example `category:network-dns`) to narrow it; tokens combine
+  with AND. To see Subsystem and Category, right-click the column header and
+  add those columns.
+- **After installing a new build, turn protection off and on once.** iOS can
+  keep the previous tunnel extension process running after an install from
+  Xcode. It then keeps logging with the old code, and messages from the new
+  code won't appear.
+- **Nothing under the subsystem filter?** Filter on `process:PacketTunnel`
+  instead. If messages show there but not under `subsystem:com.iblocker`, the
+  running tunnel is an old build (see the previous point).
 - **Xcode:** messages from the app show in the debug console while running
   from Xcode. For the tunnel extension, use Console.app, since the extension
   runs in its own process.
