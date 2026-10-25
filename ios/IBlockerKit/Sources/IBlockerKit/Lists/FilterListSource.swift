@@ -75,15 +75,39 @@ public struct FilterListMetadata: Codable, Sendable, Equatable {
     public var lastModified: String?
     public var lastFetched: Date?
     public var entryCount: Int
+    /// Network/HTTP failures only; content rejections go in `lastRejection`.
     public var lastError: String?
+    /// When the source was last contacted successfully (including 304s).
+    public var lastChecked: Date?
+    /// When new content was last accepted. Migrated from `lastFetched`.
+    public var lastAccepted: Date?
+    /// Why the most recent download was refused (e.g. failed validation).
+    public var lastRejection: String?
 
     public init(etag: String? = nil, lastModified: String? = nil, lastFetched: Date? = nil,
-                entryCount: Int = 0, lastError: String? = nil) {
+                entryCount: Int = 0, lastError: String? = nil,
+                lastChecked: Date? = nil, lastAccepted: Date? = nil, lastRejection: String? = nil) {
         self.etag = etag
         self.lastModified = lastModified
         self.lastFetched = lastFetched
         self.entryCount = entryCount
         self.lastError = lastError
+        self.lastChecked = lastChecked
+        self.lastAccepted = lastAccepted
+        self.lastRejection = lastRejection
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        etag = try c.decodeIfPresent(String.self, forKey: .etag)
+        lastModified = try c.decodeIfPresent(String.self, forKey: .lastModified)
+        lastFetched = try c.decodeIfPresent(Date.self, forKey: .lastFetched)
+        entryCount = try c.decodeIfPresent(Int.self, forKey: .entryCount) ?? 0
+        lastError = try c.decodeIfPresent(String.self, forKey: .lastError)
+        lastChecked = try c.decodeIfPresent(Date.self, forKey: .lastChecked)
+        lastRejection = try c.decodeIfPresent(String.self, forKey: .lastRejection)
+        // State saved before these fields existed only has lastFetched.
+        lastAccepted = try c.decodeIfPresent(Date.self, forKey: .lastAccepted) ?? lastFetched
     }
 }
 
