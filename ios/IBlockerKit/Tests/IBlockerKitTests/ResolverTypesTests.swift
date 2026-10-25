@@ -62,14 +62,40 @@ final class UpstreamPresetTests: XCTestCase {
 
     func testAllPresets() {
         let all = UpstreamPreset.all
-        XCTAssertEqual(all.map(\.name), ["Cloudflare", "AdGuard DNS", "Quad9", "Cloudflare (UDP)", "Quad9 (UDP)"])
-        XCTAssertEqual(Set(all.map(\.name)).count, 5)
+        XCTAssertEqual(all.map(\.name), [
+            "Cloudflare", "Cloudflare (malware blocking)", "Cloudflare (family)",
+            "AdGuard DNS", "Quad9", "Cloudflare (UDP)", "Quad9 (UDP)",
+        ])
+        XCTAssertEqual(all.map(\.label), [
+            "Cloudflare (DoH)",
+            "Cloudflare (DoH, malware blocking)",
+            "Cloudflare (DoH, malware + adult content blocking)",
+            "AdGuard DNS (DoH, extra blocking)",
+            "Quad9 (DoH, malware blocking)",
+            "Cloudflare (UDP 53, unencrypted)",
+            "Quad9 (UDP 53, unencrypted)",
+        ])
+        XCTAssertEqual(Set(all.map(\.name)).count, 7)
+        XCTAssertTrue(UpstreamPreset.cloudflareUDP.label.contains("unencrypted"))
+        XCTAssertTrue(UpstreamPreset.quad9UDP.label.contains("unencrypted"))
         XCTAssertEqual(all[0].config, UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.1/dns-query"))
-        XCTAssertEqual(all[1].config, UpstreamConfig(kind: .doh, dohURL: "https://94.140.14.14/dns-query"))
-        XCTAssertEqual(all[2].config, UpstreamConfig(kind: .doh, dohURL: "https://9.9.9.9:5053/dns-query"))
-        XCTAssertEqual(all[3].config, UpstreamConfig(kind: .udp, udpAddress: "1.1.1.1"))
-        XCTAssertEqual(all[4].config, UpstreamConfig(kind: .udp, udpAddress: "9.9.9.9"))
-        for preset in all { XCTAssertFalse(preset.label.isEmpty) }
+        XCTAssertEqual(all[1].config, UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.2/dns-query"))
+        XCTAssertEqual(all[2].config, UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.3/dns-query"))
+        XCTAssertEqual(all[3].config, UpstreamConfig(kind: .doh, dohURL: "https://94.140.14.14/dns-query"))
+        XCTAssertEqual(all[4].config, UpstreamConfig(kind: .doh, dohURL: "https://9.9.9.9/dns-query"))
+        XCTAssertEqual(all[5].config, UpstreamConfig(kind: .udp, udpAddress: "1.1.1.1"))
+        XCTAssertEqual(all[6].config, UpstreamConfig(kind: .udp, udpAddress: "9.9.9.9"))
+    }
+
+    func testMalwareBlockingConfigNamesCloudflareMalware() {
+        XCTAssertEqual(
+            UpstreamPreset.name(for: UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.2/dns-query")),
+            "Cloudflare (malware blocking)")
+    }
+
+    func testQuad9TunnelDoHURLUsesPort443() {
+        XCTAssertEqual(DNSProviderPreset.quad9.tunnelDoHURL, "https://9.9.9.9/dns-query")
+        XCTAssertEqual(DNSProviderPreset.quad9.serverURL, "https://dns.quad9.net/dns-query")
     }
 
     func testNameForConfig() {
