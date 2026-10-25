@@ -24,14 +24,6 @@ public struct DashboardView: View {
 
                     pauseControls
 
-                    NavigationLink {
-                        BlockingTestView()
-                    } label: {
-                        Label("Verify ad blocking", systemImage: "checkmark.seal")
-                            .font(.callout.weight(.medium))
-                    }
-                    .buttonStyle(.bordered)
-
                     countersRow
 
                     StatsChartView()
@@ -48,7 +40,7 @@ public struct DashboardView: View {
                 .padding(.bottom, 32)
             }
             .background(DashboardBackground())
-            .navigationTitle("Just an AdBlocker")
+            .navigationTitle("Personal AdBlocker")
             .task {
                 await refreshLoop()
             }
@@ -243,12 +235,8 @@ struct CounterTile: View {
 
 struct DashboardBackground: View {
     var body: some View {
-        LinearGradient(
-            colors: [Color.blue.opacity(0.12), Color.purple.opacity(0.10), Color.clear],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .ignoresSafeArea()
+        Color(.systemBackground)
+            .ignoresSafeArea()
     }
 }
 #endif

@@ -155,7 +155,7 @@ public struct SettingsView: View {
 
                 Section("About") {
                     LabeledContent("Version", value: appVersion)
-                    Text("AdBlocker runs entirely on-device: a local VPN inspects only DNS lookups and answers blocked ones itself. No accounts, no subscriptions, no telemetry.")
+                    Text("Personal AdBlocker runs entirely on-device: a local VPN inspects only DNS lookups and answers blocked ones itself. No accounts, no subscriptions, no telemetry.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
