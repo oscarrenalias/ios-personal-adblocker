@@ -85,12 +85,14 @@ final class SharedSettingsTests: XCTestCase {
         settings.upstreamConfig = network
         XCTAssertEqual(settings.upstreamConfig, network)
 
-        let data = try TunnelIPCCoder.encode(.setUpstream(network))
-        guard case .setUpstream(let decoded) = try TunnelIPCCoder.decodeRequest(data) else {
-            return XCTFail("expected setUpstream")
+        let resolver = ResolverSettings(useAlternative: false, alternative: network,
+                                        alternativeName: "Custom", fallbackPolicy: .none)
+        let data = try TunnelIPCCoder.encode(.setResolverSettings(resolver))
+        guard case .setResolverSettings(let decoded) = try TunnelIPCCoder.decodeRequest(data) else {
+            return XCTFail("expected setResolverSettings")
         }
-        XCTAssertEqual(decoded, network)
-        XCTAssertEqual(decoded.kind, .network)
+        XCTAssertEqual(decoded, resolver)
+        XCTAssertEqual(decoded.alternative.kind, .network)
     }
 
     func testStoredDoHConfigStillDecodesUnchanged() throws {
@@ -106,5 +108,84 @@ final class SharedSettingsTests: XCTestCase {
         XCTAssertEqual(decoded, UpstreamConfig(kind: .doh, dohURL: "https://94.140.14.14/dns-query"))
         let udp = try JSONDecoder().decode(UpstreamConfig.self, from: Data(#"{"kind":"udp","udpAddress":"1.1.1.1"}"#.utf8))
         XCTAssertEqual(udp, UpstreamConfig(kind: .udp, udpAddress: "1.1.1.1"))
+    }
+
+    // MARK: - ResolverSettings migration
+
+    private func makeDefaults() -> (UserDefaults, SharedSettings, String) {
+        let suite = "iblocker-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        return (defaults, SharedSettings(defaults: defaults), suite)
+    }
+
+    func testResolverSettingsDefaultValues() {
+        let d = ResolverSettings.default
+        XCTAssertFalse(d.useAlternative)
+        XCTAssertEqual(d.alternativeName, "Cloudflare")
+        XCTAssertEqual(d.alternative, UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.1/dns-query"))
+        XCTAssertEqual(d.fallbackPolicy, .networkDNS)
+    }
+
+    func testResolverSettingsNoKeysGivesDefault() {
+        let (_, settings, suite) = makeDefaults()
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(settings.resolverSettings, .default)
+    }
+
+    func testResolverSettingsMigrationFromLegacyUpstream() {
+        let cases: [(UpstreamConfig, String)] = [
+            (UpstreamPreset.quad9.config, "Quad9"),
+            (UpstreamPreset.cloudflareUDP.config, "Cloudflare (UDP)"),
+            (UpstreamConfig(kind: .doh, dohURL: "https://example.net/dns-query"), "Custom"),
+        ]
+        for (legacy, name) in cases {
+            let (defaults, settings, suite) = makeDefaults()
+            defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+            settings.upstreamConfig = legacy
+            let before = defaults.data(forKey: SharedSettings.Keys.upstreamConfig)
+
+            let derived = settings.resolverSettings
+            XCTAssertTrue(derived.useAlternative)
+            XCTAssertEqual(derived.alternative, legacy)
+            XCTAssertEqual(derived.alternativeName, name)
+            XCTAssertEqual(derived.fallbackPolicy, .networkDNS)
+
+            XCTAssertNil(defaults.object(forKey: SharedSettings.Keys.resolverSettings), "read must not write")
+            XCTAssertEqual(defaults.data(forKey: SharedSettings.Keys.upstreamConfig), before)
+        }
+    }
+
+    func testResolverSettingsLegacyNetworkGivesDefault() {
+        let (_, settings, suite) = makeDefaults()
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        settings.upstreamConfig = UpstreamConfig(kind: .network)
+        XCTAssertEqual(settings.resolverSettings, .default)
+    }
+
+    func testResolverSettingsStoredValueWinsAndRoundTrips() {
+        let (_, settings, suite) = makeDefaults()
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        settings.upstreamConfig = UpstreamPreset.quad9.config
+        let stored = ResolverSettings(useAlternative: false, alternative: UpstreamPreset.adGuard.config,
+                                      alternativeName: "AdGuard DNS", fallbackPolicy: .none)
+        settings.resolverSettings = stored
+        XCTAssertEqual(settings.resolverSettings, stored)
+    }
+
+    func testResolverSettingsCorruptDataFallsBackToDerivation() {
+        let (defaults, settings, suite) = makeDefaults()
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        defaults.set(Data("not json".utf8), forKey: SharedSettings.Keys.resolverSettings)
+        settings.upstreamConfig = UpstreamPreset.cloudflare.config
+        let derived = settings.resolverSettings
+        XCTAssertTrue(derived.useAlternative)
+        XCTAssertEqual(derived.alternativeName, "Cloudflare")
+    }
+
+    func testFallbackPolicyCodableRoundTrip() throws {
+        for policy in FallbackPolicy.allCases {
+            let data = try JSONEncoder().encode(policy)
+            XCTAssertEqual(try JSONDecoder().decode(FallbackPolicy.self, from: data), policy)
+        }
     }
 }

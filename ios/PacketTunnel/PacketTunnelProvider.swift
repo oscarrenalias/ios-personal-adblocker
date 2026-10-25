@@ -269,16 +269,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 response = .failure("invalid resolver settings")
             }
 
-        case .setUpstream(let config):
-            if let upstream = makeUpstream(config) {
-                await engine.setUpstream(upstream)
-                Self.log.notice("setUpstream applied: \(config.displayName)")
-                response = .ok
-            } else {
-                Self.log.error("setUpstream failed: kind \(String(describing: config.kind)), reason: upstream could not be built")
-                response = .failure("invalid upstream config")
-            }
-
         case .setPause(let until):
             if let groupID = AppGroupPaths.groupID(from: Bundle.main),
                let settings = SharedSettings(groupID: groupID) {
