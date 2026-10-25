@@ -45,8 +45,9 @@ final class DNSProxyEngineTests: XCTestCase {
 
     /// handlePacket + unwrap (XCTUnwrap's autoclosure cannot contain await).
     private func handled(_ engine: DNSProxyEngine, _ packet: Data) async throws -> Data {
-        let reply = await engine.handlePacket(packet)
-        return try XCTUnwrap(reply)
+        let replies = await engine.handlePacket(packet)
+        XCTAssertEqual(replies.count, 1)
+        return try XCTUnwrap(replies.first)
     }
 
     private func dnsPayload(from reply: Data) throws -> MiniDNSResponse {
@@ -129,14 +130,32 @@ final class DNSProxyEngineTests: XCTestCase {
         XCTAssertEqual(try dnsPayload(from: reply).rcode, 2)
     }
 
-    func testOversizeAnswerGetsTruncatedFlag() async throws {
+    func testOversizeAnswerIsFragmentedNotTruncated() async throws {
         let upstream = MockUpstream { query in
             var big = [UInt8](fakeAnswer(for: query))
-            big.append(contentsOf: [UInt8](repeating: 0, count: 2000))
+            big.append(contentsOf: [UInt8](repeating: 0, count: 3000 - big.count))
             return Data(big)
         }
         let engine = try makeEngine(upstream: upstream)
         let query = makeDNSQueryData(name: "big.example.com")
+        for packet in [makeUDPPacketV4(payload: [UInt8](query)), makeUDPPacketV6(payload: [UInt8](query))] {
+            let replies = await engine.handlePacket(packet)
+            XCTAssertGreaterThanOrEqual(replies.count, 3)
+            XCTAssertTrue(replies.allSatisfy { $0.count <= TunnelConstants.mtu })
+            let datagram = try XCTUnwrap(reassemble(replies))
+            XCTAssertEqual(datagram.payload.count, 3000)
+            XCTAssertEqual(datagram.payload[2] & 0x02, 0, "TC must not be set")
+        }
+    }
+
+    func testAnswerAboveMaxUDPSizeFallsBackToTruncated() async throws {
+        let upstream = MockUpstream { query in
+            var big = [UInt8](fakeAnswer(for: query))
+            big.append(contentsOf: [UInt8](repeating: 0, count: 70_000))
+            return Data(big)
+        }
+        let engine = try makeEngine(upstream: upstream)
+        let query = makeDNSQueryData(name: "huge.example.com")
         let reply = try await handled(engine, makeUDPPacketV4(payload: [UInt8](query)))
         XCTAssertTrue(try dnsPayload(from: reply).isTruncated)
     }
@@ -146,15 +165,15 @@ final class DNSProxyEngineTests: XCTestCase {
 
         let toOtherPort = makeUDPPacketV4(destinationPort: 8080, payload: [1, 2, 3])
         let dropped = await engine.handlePacket(toOtherPort)
-        XCTAssertNil(dropped)
+        XCTAssertTrue(dropped.isEmpty)
 
         var tcp = [UInt8](makeUDPPacketV4(payload: [UInt8](makeDNSQueryData(name: "a.example.com"))))
         tcp[9] = 6
         let droppedTCP = await engine.handlePacket(Data(tcp))
-        XCTAssertNil(droppedTCP)
+        XCTAssertTrue(droppedTCP.isEmpty)
 
         let garbage = await engine.handlePacket(Data([0xDE, 0xAD, 0xBE, 0xEF]))
-        XCTAssertNil(garbage)
+        XCTAssertTrue(garbage.isEmpty)
     }
 
     func testUnparseableDNSIsForwardedRaw() async throws {
@@ -169,7 +188,7 @@ final class DNSProxyEngineTests: XCTestCase {
         }
         let engine = try makeEngine(upstream: upstream)
         let reply = await engine.handlePacket(makeUDPPacketV4(payload: responseLike))
-        XCTAssertNotNil(reply)
+        XCTAssertFalse(reply.isEmpty)
     }
 
     func testStatsAndLogAreRecorded() async throws {
@@ -295,11 +314,11 @@ final class DNSProxyEngineRouterTests: XCTestCase {
         let (engine, _) = try engine(router: router)
 
         let blocked = await engine.handlePacket(makeUDPPacketV4(payload: [UInt8](makeDNSQueryData(name: "ads.example.com"))))
-        XCTAssertNotNil(blocked)
+        XCTAssertFalse(blocked.isEmpty)
         XCTAssertEqual(net.calls + alt.calls, 0)
 
         let reply = await engine.handlePacket(makeUDPPacketV4(payload: [UInt8](makeDNSQueryData(name: "example.com"))))
-        let udp = try XCTUnwrap(PacketParser.parseUDP(try XCTUnwrap(reply)))
+        let udp = try XCTUnwrap(PacketParser.parseUDP(try XCTUnwrap(reply.first)))
         let resp = try XCTUnwrap(MiniDNSResponse(Data(udp.payload)))
         XCTAssertEqual(resp.rcode, 2)
         XCTAssertEqual(alt.calls, 1)

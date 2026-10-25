@@ -306,9 +306,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             for packet in packets {
                 Task { [weak self] in
                     guard let self, let engine = self.engine else { return }
-                    if let reply = await engine.handlePacket(packet) {
-                        let family = (([UInt8](reply).first ?? 0) >> 4) == 6 ? AF_INET6 : AF_INET
-                        self.packetFlow.writePackets([reply], withProtocols: [NSNumber(value: family)])
+                    let replies = await engine.handlePacket(packet)
+                    if !replies.isEmpty {
+                        let protocols = replies.map { NSNumber(value: (([UInt8]($0).first ?? 0) >> 4) == 6 ? AF_INET6 : AF_INET) }
+                        self.packetFlow.writePackets(replies, withProtocols: protocols)
                     }
                 }
             }

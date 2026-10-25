@@ -3,7 +3,7 @@ import Foundation
 /// Synthesizes DNS responses locally, without touching the network.
 ///
 /// Responses echo the question section byte-exactly (preserving 0x20 case
-/// randomization) and never set TC, so clients never retry over TCP.
+/// randomization) and never set TC.
 /// EDNS0 is deliberately stripped: synthesized responses are tiny.
 public enum DNSResponseBuilder {
 
@@ -31,8 +31,9 @@ public enum DNSResponseBuilder {
         build(query: query, rcode: 2, answerRData: nil, ttl: 0)
     }
 
-    /// Header-only response with TC set, for the rare upstream answer too
-    /// large to fit back through the tunnel MTU unfragmented.
+    /// Header-only response with TC set. Only a last resort for an upstream
+    /// answer larger than the maximum UDP datagram; anything smaller is
+    /// IP-fragmented instead (the tunnel does not serve TCP:53).
     public static func truncated(for query: DNSQuery) -> Data {
         build(query: query, rcode: 0, answerRData: nil, ttl: 0, extraFlags: 0x0200)
     }

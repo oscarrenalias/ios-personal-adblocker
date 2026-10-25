@@ -51,9 +51,10 @@ Key decisions:
   domains get NODATA for every non-A/AAAA qtype.
 - **0x20 preserved**: responses echo the question section byte-exactly, so
   resolvers using case-randomization accept our answers.
-- **TC never set** on synthesized answers → clients never retry over TCP →
-  not serving TCP:53 is safe. With a DoH upstream, upstream
-  truncation is impossible too.
+- **TC is not set on synthesized answers**, and large upstream answers are
+  IP-fragmented (RFC 791 / 8200) rather than truncated, because the tunnel
+  does not serve TCP:53. TC is only a last resort for answers above the
+  maximum UDP datagram size (65,507 bytes IPv4 / 65,527 IPv6).
 
 ## Resolver router and failover
 
