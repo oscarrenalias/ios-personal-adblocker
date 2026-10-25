@@ -277,6 +277,42 @@ final class FilterListPipelineTests: XCTestCase {
         XCTAssertEqual(calls.value, 2)
     }
 
+    func testConcurrentMixedUpdatesAllComplete() async throws {
+        for _ in 0..<5 {
+            let paths = AppGroupPaths(containerURL: try makeTempDirectory())
+            let data = body(5)
+            let store = try await makeStore(paths: paths) { _ in
+                try await Task.sleep(nanoseconds: UInt64.random(in: 1_000_000...10_000_000))
+                return FetchResult(statusCode: 200, body: data)
+            }
+            let finished = await withTaskGroup(of: Bool.self) { group in
+                group.addTask {
+                    await withTaskGroup(of: Void.self) { inner in
+                        for i in 0..<50 {
+                            inner.addTask {
+                                if i % 2 == 0 {
+                                    _ = await store.updateAll(force: true, trigger: .user)
+                                } else {
+                                    _ = await store.update(sourceIDs: ["test"], force: true, trigger: .user)
+                                }
+                            }
+                        }
+                    }
+                    return true
+                }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    return false
+                }
+                let first = await group.next() ?? false
+                group.cancelAll()
+                return first
+            }
+            XCTAssertTrue(finished, "mixed concurrent updates did not complete within 10 s")
+            if !finished { return }
+        }
+    }
+
     func testUpdateAllSummaryCountsAndCompileOnlyWhenChanged() async throws {
         let paths = AppGroupPaths(containerURL: try makeTempDirectory())
         let mode = Counter()

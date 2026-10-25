@@ -12,6 +12,8 @@ public actor FilterListStore {
     private var inFlightUpdate: Task<UpdateSummary, Never>?
     /// Scope of `inFlightUpdate`; nil means a full run over every source.
     private var inFlightScope: Set<String>?
+    /// Identity of `inFlightUpdate`, so a finishing run only clears its own state.
+    private var inFlightRunID = 0
 
     /// What started an update run; logged only.
     public enum UpdateTrigger: String, Sendable {
@@ -49,14 +51,14 @@ public actor FilterListStore {
     /// anything changed. A call that arrives while a run is in progress
     /// awaits that run and returns its summary without downloading again.
     public func updateAll(force: Bool = false, trigger: UpdateTrigger) async -> UpdateSummary {
-        if let running = inFlightUpdate {
+        while let running = inFlightUpdate {
             if inFlightScope == nil {
                 log.debug("update joined in-flight run (trigger \(trigger.rawValue))")
                 return await running.value
             }
-            // A partial run doesn't cover every source; wait for it, then run.
+            // A partial run doesn't cover every source; wait for it, then re-check.
+            // The run clears its own state before finishing, so this can't re-await it.
             _ = await running.value
-            return await updateAll(force: force, trigger: trigger)
         }
         return await start(scope: nil, force: force, trigger: trigger)
     }
@@ -70,14 +72,27 @@ public actor FilterListStore {
         return await start(scope: sourceIDs, force: force, trigger: trigger)
     }
 
+    /// Must be called with no run in flight and without suspending between that
+    /// check and this call. The run task clears the in-flight state itself, on
+    /// the actor and before producing its value, so any waiter resumed by the
+    /// task's completion sees nil or a newer run, never the finished one.
     private func start(scope: Set<String>?, force: Bool, trigger: UpdateTrigger) async -> UpdateSummary {
-        let task = Task { await self.runUpdate(force: force, trigger: trigger, scope: scope) }
+        inFlightRunID += 1
+        let runID = inFlightRunID
+        let task = Task {
+            let summary = await self.runUpdate(force: force, trigger: trigger, scope: scope)
+            self.clearInFlight(runID: runID)
+            return summary
+        }
         inFlightUpdate = task
         inFlightScope = scope
-        let summary = await task.value
+        return await task.value
+    }
+
+    private func clearInFlight(runID: Int) {
+        guard inFlightRunID == runID else { return }
         inFlightUpdate = nil
         inFlightScope = nil
-        return summary
     }
 
     private func runUpdate(force: Bool, trigger: UpdateTrigger, scope: Set<String>?) async -> UpdateSummary {
