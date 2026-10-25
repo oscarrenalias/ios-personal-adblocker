@@ -37,7 +37,7 @@ path changes) using the same wrapper.
 | Level | Use for | Examples |
 |---|---|---|
 | `error` | Something failed that shouldn't have | upstream error, file can't be read, IPC message can't be decoded, settings can't be applied |
-| `notice` | Important state changes, rare | tunnel start/stop, upstream switched, alternative resolver marked down or back up |
+| `notice` | Important state changes, rare | tunnel start/stop, upstream switched, alternative resolver marked down or back up, old Quad9 URL replaced (category `settings`, once per process: `replaced old Quad9 URL https://9.9.9.9:5053/dns-query -> https://9.9.9.9/dns-query`) |
 | `info` | Normal events, at most a few per minute | network path changed (old → new interface), rules reloaded (with counts), list refresh result |
 | `debug` | Per-query and step-by-step detail | each lookup's verdict and which upstream answered it, upstream timing, raw `dns_sd` results, retry decisions |
 
