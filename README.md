@@ -26,6 +26,8 @@ Wi-Fi, a network that blocks DNS over HTTPS, a resolver outage), lookups fall
 back to Network DNS, which is unencrypted, so the phone keeps working. The
 alternative is retried in the background until it answers again. In Settings
 you can choose **Don't fall back** instead, so lookups fail rather than leave
+unencrypted. The status line on the Dashboard and in Settings shows whether
+lookups are currently encrypted, and warns when a fallback has made them
 unencrypted. Names that only your local network or carrier can answer (router
 pages, Wi-Fi calling) always use Network DNS. `.local` names are answered
 "not found" inside the tunnel and resolve over multicast DNS outside it.
