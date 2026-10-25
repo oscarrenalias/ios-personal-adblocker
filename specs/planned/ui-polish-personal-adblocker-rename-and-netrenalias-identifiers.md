@@ -5,7 +5,7 @@ description: "Remove Verify from Dashboard, rename to Personal AdBlocker, move i
 dependencies: null
 priority: medium
 complexity: null
-status: done
+status: planned
 tags:
 - ui
 - branding
