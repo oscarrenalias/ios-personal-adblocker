@@ -18,6 +18,7 @@ Written 2026-10-25.
 | 4 | [Explain each decision](#explain-each-decision) + [Rule testing](#rule-testing) | 3 (to report "from cache") | L |
 | 5 | [Protection health indicator](#protection-health-indicator) | 0, 1 (status signals) | M |
 | 6 | [Quick controls](#quick-controls) (profiles dropped) | — | S |
+| 7 | [Status notifications](#status-notifications) | resolver status (done); 5 for rules/health signals | M |
 
 Why this order:
 - **1 first:** it decides how failures behave, and it's a small addition to a
@@ -180,3 +181,46 @@ Profiles were **dropped** on 2026-10-25 to keep things simple.
 - Pause lengths in Control Center. Today the toggle is only on/off.
 - Possibly: show encryption state in widgets and Control Center (follow-up
   from `spec-c7e3c45d`).
+
+## Status notifications
+
+**Want:** a notification when protection changes in the background, for
+example when encrypted DNS stops being reachable and lookups go unencrypted,
+and again when it's restored. Added 2026-10-25.
+
+**Exists:** the tunnel already knows the resolver state (`ResolverStatus`:
+`alternative` / `fallingBack` / `failing` / `network`) and logs each change.
+The app shows it in the Dashboard status line, but only while the app is
+open. There are no notifications today.
+
+**Scenarios to cover:**
+
+| Event | Notify? | Example text |
+|---|---|---|
+| Encrypted alternative unreachable, falling back | yes | "Encrypted DNS unavailable. Lookups are going unencrypted to your network's DNS." |
+| Alternative unreachable, fallback off | yes | "DNS lookups are failing. <name> can't be reached and fallback is off." |
+| Restored after either of the above | yes, only if the problem was notified | "Encrypted DNS restored (<name>)." |
+| Protection stopped unexpectedly (tunnel stopped for a reason other than the user turning it off, e.g. provider failure) | yes | "Ad blocking stopped. Open the app to turn it back on." |
+| Rules not fully loaded for more than N minutes (degraded start) | yes, after 5 is done | "Only built-in rules are active." |
+| A blocklist update was rejected, or a list is stale (more than 7 days) | maybe, from background refresh | "Blocklist update rejected: <list>. Using the previous version." |
+| Pause ended, protection resumed | optional | "Ad blocking resumed." |
+
+**Design points to settle in the spec:**
+- **Who posts:** most events originate in the tunnel extension while the app
+  isn't running. Needs on-device verification that the packet tunnel
+  extension can post local notifications with `UNUserNotificationCenter`.
+  The app asks for permission. If the extension can't post, use a fallback
+  (for example, the app posts on its next background refresh).
+- **No flapping:** notify only once a state has persisted for a short time
+  (for example 30 s), with at most one notification per event type per few
+  minutes. A "restored" notification only follows a notified problem.
+  Captive-portal Wi-Fi and network switches must not produce a burst of
+  notifications.
+- **User control:** a Settings section with a master switch and per-type
+  toggles. The permission request happens when the user turns it on, not at
+  first launch.
+- **Privacy:** never include domain names. Resolver names and list names are
+  fine.
+- **Tapping a notification** opens the relevant screen (Dashboard for
+  resolver and protection, Lists for list problems).
+
