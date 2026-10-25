@@ -1,3 +1,4 @@
+import Network
 import NetworkExtension
 import os
 import IBlockerKit
@@ -14,6 +15,52 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var engine: DNSProxyEngine?
     private var paths: AppGroupPaths?
     private var maintenanceTask: Task<Void, Never>?
+    private var pathMonitor: NWPathMonitor?
+    private let physicalInterface = InterfaceIndexBox()
+    private let pathQueue = DispatchQueue(label: "com.iblocker.tunnel.path")
+
+    /// Thread-safe holder for the current physical interface index, written
+    /// from the path monitor queue and read from upstream resolves.
+    private final class InterfaceIndexBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: UInt32?
+
+        func get() -> UInt32? {
+            lock.lock(); defer { lock.unlock() }
+            return value
+        }
+
+        func set(_ newValue: UInt32?) {
+            lock.lock(); defer { lock.unlock() }
+            value = newValue
+        }
+    }
+
+    /// Builds the upstream; `.network` is backed by the live path-monitor
+    /// interface so Wi-Fi ↔ cellular switches apply without a tunnel restart.
+    private func makeUpstream(_ config: UpstreamConfig) -> DNSUpstream? {
+        if config.kind == .network {
+            let box = physicalInterface
+            return NetworkDNSUpstream(interfaceIndex: { box.get() })
+        }
+        return UpstreamFactory.make(config)
+    }
+
+    /// Tracks the first Wi-Fi / cellular / wired interface. `.other` is
+    /// deliberately excluded: that is the tunnel's own utun.
+    private func startPathMonitor() {
+        pathMonitor?.cancel()
+        let box = physicalInterface
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { path in
+            let selected = path.availableInterfaces.first {
+                $0.type == .wifi || $0.type == .cellular || $0.type == .wiredEthernet
+            }
+            box.set(selected.map { UInt32($0.index) })
+        }
+        monitor.start(queue: pathQueue)
+        pathMonitor = monitor
+    }
 
     override func startTunnel(options: [String: NSObject]?) async throws {
         guard let groupID = AppGroupPaths.groupID(from: Bundle.main),
@@ -26,8 +73,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         let settings = SharedSettings(groupID: groupID)
         let upstreamConfig = settings?.upstreamConfig ?? .default
-        guard let upstream = UpstreamFactory.make(upstreamConfig) else {
+        startPathMonitor()
+        guard let upstream = makeUpstream(upstreamConfig) else {
             Self.log.error("invalid upstream config")
+            pathMonitor?.cancel()
+            pathMonitor = nil
             throw NEVPNError(.configurationInvalid)
         }
 
@@ -99,6 +149,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func stopTunnel(with reason: NEProviderStopReason) async {
         Self.log.info("tunnel stopping: \(String(describing: reason), privacy: .public)")
         maintenanceTask?.cancel()
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        physicalInterface.set(nil)
         if let groupID = AppGroupPaths.groupID(from: Bundle.main),
            let settings = SharedSettings(groupID: groupID) {
             settings.protectionActive = false
@@ -131,7 +184,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             response = .stats(await engine.statsSnapshot(memoryBytes: UInt64(os_proc_available_memory())))
 
         case .setUpstream(let config):
-            if let upstream = UpstreamFactory.make(config) {
+            if let upstream = makeUpstream(config) {
                 await engine.setUpstream(upstream)
                 response = .ok
             } else {
