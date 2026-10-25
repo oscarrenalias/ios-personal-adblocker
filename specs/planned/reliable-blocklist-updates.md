@@ -5,14 +5,14 @@ description: "Validate list downloads before replacing (keep last good), single 
 dependencies: null
 priority: high
 complexity: null
-status: draft
+status: planned
 tags:
 - lists
 - reliability
 scope:
   in: null
   out: null
-feature_root_id: null
+feature_root_id: B-538bb61d
 ---
 # Reliable blocklist updates
 
