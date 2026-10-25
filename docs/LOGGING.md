@@ -24,6 +24,10 @@ from the logs alone.
   is `Log` (`IBlockerKit/Shared/Log.swift`). Create one per component with
   `Log(category: "engine")` and call `error`, `notice`, `info` or `debug`.
   Messages are logged `privacy: .public`.
+- Messages are autoclosures. Each level method checks
+  `OSLog.isEnabled(type:)` first and skips building the message when that
+  level isn't being collected, so a per-query `debug` call with string
+  interpolation costs only the check.
 
 `PacketTunnelProvider` logs under category `tunnel` (and `path` for network
 path changes) using the same wrapper.
