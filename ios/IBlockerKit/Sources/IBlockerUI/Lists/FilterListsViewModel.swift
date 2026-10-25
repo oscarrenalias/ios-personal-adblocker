@@ -13,9 +13,11 @@ public final class FilterListsViewModel {
     public var errorMessage: String?
 
     private let paths: AppGroupPaths
+    private let store: FilterListStore
 
-    public init(paths: AppGroupPaths) {
+    public init(paths: AppGroupPaths, store: FilterListStore = AppEnvironment.listStore) {
         self.paths = paths
+        self.store = store
         self.state = FilterListState.load(from: paths.filterStateURL)
     }
 
@@ -26,9 +28,11 @@ public final class FilterListsViewModel {
     // MARK: - Sources
 
     public func setSource(id: String, enabled: Bool) async {
-        guard let index = state.sources.firstIndex(where: { $0.id == id }) else { return }
-        state.sources[index].enabled = enabled
-        persist()
+        guard state.sources.contains(where: { $0.id == id }) else { return }
+        await apply { state in
+            guard let index = state.sources.firstIndex(where: { $0.id == id }) else { return }
+            state.sources[index].enabled = enabled
+        }
         if SeedRules.bundledText(for: id) != nil {
             // Bundled sources need no download — recompile is enough.
             await compileOnly()
@@ -56,27 +60,37 @@ public final class FilterListsViewModel {
     /// Validates by test-downloading before accepting the source.
     public func addCustomSource(name: String, url: URL) async -> Bool {
         let id = "custom-" + UUID().uuidString.prefix(8).lowercased()
-        var probe = FilterListState()
-        probe.sources = [FilterListSource(id: id, name: name, url: url, enabled: true, isBuiltIn: false)]
-        let updater = FilterListUpdater(paths: paths)
-        let summary = await updater.update(state: &probe, force: true)
-        guard summary.updatedSourceIDs.contains(id) else {
-            errorMessage = summary.failedSourceIDs[id] ?? "Download failed"
+        let source = FilterListSource(id: id, name: name, url: url, enabled: true, isBuiltIn: false)
+        do {
+            try await store.mutate { state in state.sources.append(source) }
+        } catch {
+            errorMessage = "Could not save the new list"
             return false
         }
-        state.sources.append(FilterListSource(id: id, name: name, url: url, enabled: true, isBuiltIn: false))
-        state.metadata[id] = probe.metadata[id]
-        persist()
+        let summary = await store.updateAll(force: false, trigger: .user)
+        guard summary.updatedSourceIDs.contains(id) else {
+            errorMessage = summary.failedSourceIDs[id] ?? "Download failed"
+            // Roll back the probe so a rejected source never lingers.
+            try? await store.mutate { state in
+                state.sources.removeAll { $0.id == id }
+                state.metadata[id] = nil
+            }
+            try? FileManager.default.removeItem(at: paths.cachedListURL(sourceID: id))
+            reloadState()
+            return false
+        }
+        reloadState()
         await compileOnly()
         return true
     }
 
     public func removeSource(id: String) async {
         guard let index = state.sources.firstIndex(where: { $0.id == id }), !state.sources[index].isBuiltIn else { return }
-        state.sources.remove(at: index)
-        state.metadata[id] = nil
         try? FileManager.default.removeItem(at: paths.cachedListURL(sourceID: id))
-        persist()
+        await apply { state in
+            state.sources.removeAll { $0.id == id }
+            state.metadata[id] = nil
+        }
         await compileOnly()
     }
 
@@ -85,28 +99,24 @@ public final class FilterListsViewModel {
     public func addAllow(_ domain: String) async {
         guard let normalized = DomainValidator.normalize(domain),
               !state.userAllowlist.contains(normalized) else { return }
-        state.userAllowlist.append(normalized)
-        persist()
+        await apply { $0.userAllowlist.append(normalized) }
         await compileOnly()
     }
 
     public func addDeny(_ domain: String) async {
         guard let normalized = DomainValidator.normalize(domain),
               !state.userDenylist.contains(normalized) else { return }
-        state.userDenylist.append(normalized)
-        persist()
+        await apply { $0.userDenylist.append(normalized) }
         await compileOnly()
     }
 
     public func removeAllow(_ domain: String) async {
-        state.userAllowlist.removeAll { $0 == domain }
-        persist()
+        await apply { $0.userAllowlist.removeAll { $0 == domain } }
         await compileOnly()
     }
 
     public func removeDeny(_ domain: String) async {
-        state.userDenylist.removeAll { $0 == domain }
-        persist()
+        await apply { $0.userDenylist.removeAll { $0 == domain } }
         await compileOnly()
     }
 
@@ -114,15 +124,13 @@ public final class FilterListsViewModel {
 
     public var onRulesChanged: (@MainActor () async -> Void)?
 
-    public func updateAndCompile(force: Bool) async {
+    public func updateAndCompile(force: Bool, trigger: FilterListStore.UpdateTrigger = .user) async {
         guard !isUpdating else { return }
         isUpdating = true
         defer { isUpdating = false }
 
-        var working = state
-        let updater = FilterListUpdater(paths: paths)
-        let summary = await updater.update(state: &working, force: force)
-        state = working
+        let summary = await store.updateAll(force: force, trigger: trigger)
+        reloadState()
 
         if !summary.failedSourceIDs.isEmpty {
             let names = summary.failedSourceIDs.keys.sorted().joined(separator: ", ")
@@ -131,25 +139,20 @@ public final class FilterListsViewModel {
             errorMessage = nil
         }
 
-        await compileOnly()
+        // The store recompiles when anything changed; refresh stats and notify.
+        if let stats = try? await store.compile() {
+            lastCompileStats = stats
+        }
+        reloadState()
+        await onRulesChanged?()
         AppEnvironment.settings.lastListUpdate = Date()
     }
 
-    /// Recompiles from cached list files off the main actor (large lists
-    /// parse in the hundreds of milliseconds).
+    /// Recompiles from cached list files; the store runs it off the main actor.
     public func compileOnly() async {
-        let paths = self.paths
-        let input = state
-        let compiled: (FilterListState, CompileStats)? = await Task.detached(priority: .userInitiated) {
-            var working = input
-            guard let stats = try? BlocklistCompiler.compile(state: &working, paths: paths) else { return nil }
-            return (working, stats)
-        }.value
-
-        if let (newState, stats) = compiled {
-            state = newState
+        if let stats = try? await store.compile() {
             lastCompileStats = stats
-            persist()
+            reloadState()
             await onRulesChanged?()
         }
     }
@@ -170,12 +173,18 @@ public final class FilterListsViewModel {
     public func refreshIfStale() async {
         let last = AppEnvironment.settings.lastListUpdate ?? .distantPast
         if Date().timeIntervalSince(last) > 24 * 3600 {
-            await updateAndCompile(force: false)
+            await updateAndCompile(force: false, trigger: .staleCheck)
         }
     }
 
-    private func persist() {
-        try? state.save(to: paths.filterStateURL)
+    /// Applies a state edit through the store, then refreshes the local mirror.
+    private func apply(_ body: (inout FilterListState) -> Void) async {
+        try? await store.mutate { state in body(&state) }
+        reloadState()
+    }
+
+    private func reloadState() {
+        state = FilterListState.load(from: paths.filterStateURL)
     }
 }
 #endif
