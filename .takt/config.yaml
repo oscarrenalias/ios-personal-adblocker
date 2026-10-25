@@ -4,7 +4,7 @@
 common:
   default_runner: claude
   templates_dir: templates/agents
-  test_command: 
+  test_command: swift test --package-path ios/IBlockerKit
   test_timeout_seconds: 900
   commit_bead_state: false
   agent_types:
