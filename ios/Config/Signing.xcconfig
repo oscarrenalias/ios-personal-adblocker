@@ -17,7 +17,7 @@
 // this one with your own values; it is gitignored and overrides what's here.
 // ─────────────────────────────────────────────────────────────
 
-DEVELOPMENT_TEAM =
-BUNDLE_ID_PREFIX = com.almoutasem
+DEVELOPMENT_TEAM = QEZ63CXN26
+BUNDLE_ID_PREFIX = com.renalias
 
 #include? "Signing.local.xcconfig"

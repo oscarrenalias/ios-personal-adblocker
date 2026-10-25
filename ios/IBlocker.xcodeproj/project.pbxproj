@@ -436,11 +436,8 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C40000000000000000000003 /* App.xcconfig */;
 			buildSettings = {
-				APP_GROUP_ID = group.com.almoutasem.iblocker;
-				BUNDLE_ID_PREFIX = com.almoutasem;
 				CURRENT_PROJECT_VERSION = 4;
 				INFOPLIST_KEY_CFBundleDisplayName = AdBlocker;
-				PRODUCT_BUNDLE_IDENTIFIER = com.almoutasem.iblocker;
 			};
 			name = Debug;
 		};
@@ -448,11 +445,8 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C40000000000000000000003 /* App.xcconfig */;
 			buildSettings = {
-				APP_GROUP_ID = group.com.almoutasem.iblocker;
-				BUNDLE_ID_PREFIX = com.almoutasem;
 				CURRENT_PROJECT_VERSION = 4;
 				INFOPLIST_KEY_CFBundleDisplayName = AdBlocker;
-				PRODUCT_BUNDLE_IDENTIFIER = com.almoutasem.iblocker;
 			};
 			name = Release;
 		};
@@ -460,8 +454,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C40000000000000000000004 /* PacketTunnel.xcconfig */;
 			buildSettings = {
-				APP_GROUP_ID = group.com.almoutasem.iblocker;
-				BUNDLE_ID_PREFIX = com.almoutasem;
 			};
 			name = Debug;
 		};
@@ -469,8 +461,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C40000000000000000000004 /* PacketTunnel.xcconfig */;
 			buildSettings = {
-				APP_GROUP_ID = group.com.almoutasem.iblocker;
-				BUNDLE_ID_PREFIX = com.almoutasem;
 			};
 			name = Release;
 		};
@@ -478,8 +468,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C40000000000000000000005 /* ContentBlocker.xcconfig */;
 			buildSettings = {
-				APP_GROUP_ID = group.com.almoutasem.iblocker;
-				BUNDLE_ID_PREFIX = com.almoutasem;
 			};
 			name = Debug;
 		};
@@ -487,8 +475,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C40000000000000000000005 /* ContentBlocker.xcconfig */;
 			buildSettings = {
-				APP_GROUP_ID = group.com.almoutasem.iblocker;
-				BUNDLE_ID_PREFIX = com.almoutasem;
 			};
 			name = Release;
 		};
@@ -496,8 +482,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C40000000000000000000006 /* Widgets.xcconfig */;
 			buildSettings = {
-				APP_GROUP_ID = group.com.almoutasem.iblocker;
-				BUNDLE_ID_PREFIX = com.almoutasem;
 			};
 			name = Debug;
 		};
@@ -505,8 +489,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C40000000000000000000006 /* Widgets.xcconfig */;
 			buildSettings = {
-				APP_GROUP_ID = group.com.almoutasem.iblocker;
-				BUNDLE_ID_PREFIX = com.almoutasem;
 			};
 			name = Release;
 		};
