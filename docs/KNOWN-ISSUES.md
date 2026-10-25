@@ -214,3 +214,23 @@ unicast DNS (Active Directory) wouldn't resolve those names through the tunnel
 either way. Decide before changing. Spec B
 (`alternative-resolver-with-failover-to-network-dns`) currently lists `local`
 as a network-only name, which would keep the timeout.
+
+### KI-16: After a reboot the tunnel ran with 17 rules and default settings
+
+- **Status:** fixed by defects `B-0d1e113d` and `B-28826355` (merged
+  2026-10-25, `9ca38b0`). Waiting for confirmation on device.
+- **Found:** on device on 2026-10-25, from a log archive.
+
+iOS starts the on-demand tunnel before the first unlock, when App Group data
+is still protected. The tunnel couldn't read the compiled blocklist (only the
+17 bundled rules applied) or the shared settings (defaults applied). It never
+logged a recovery, and the Dashboard showed the compiled file's count instead
+of the live count.
+
+**Fix:**
+- Compiled blobs (hashes only) are written without file protection.
+- The tunnel retries settings and rules on every maintenance tick until both
+  load, and logs `recovered after N s`.
+- Load errors are logged.
+- The Dashboard shows the live count, or "Tunnel not reachable", and never
+  the file's count.
