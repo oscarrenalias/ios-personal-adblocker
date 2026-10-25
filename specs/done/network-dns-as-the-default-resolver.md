@@ -5,7 +5,7 @@ description: "Add a Network DNS upstream (DNSServiceQueryRecord bound to the phy
 dependencies: null
 priority: high
 complexity: null
-status: planned
+status: done
 tags:
 - dns
 - tunnel

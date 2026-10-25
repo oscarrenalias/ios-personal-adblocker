@@ -28,8 +28,8 @@ worth knowing.
 ### KI-1: No fallback when the DNS resolver is unreachable
 
 - **Status:** specs written, in two parts:
-  1. [`spec-4cb10c45`](../specs/planned/network-dns-as-the-default-resolver.md):
-     network DNS as the default. Also the on-device feasibility check.
+  1. [`spec-4cb10c45`](../specs/done/network-dns-as-the-default-resolver.md):
+     network DNS as the default. **Done and verified on device on 2026-10-25.**
   2. [`spec-c7e3c45d`](../specs/drafts/alternative-resolver-with-failover-to-network-dns.md):
      alternative resolver with failover. Plan it only after part 1 is
      verified on device.
@@ -218,7 +218,9 @@ as a network-only name, which would keep the timeout.
 ### KI-16: After a reboot the tunnel ran with 17 rules and default settings
 
 - **Status:** fixed by defects `B-0d1e113d` and `B-28826355` (merged
-  2026-10-25, `9ca38b0`). Waiting for confirmation on device.
+  2026-10-25, `9ca38b0`). **Confirmed on device on 2026-10-25:** after a
+  reboot the tunnel was up before unlock with 233,817 rules and recovered its
+  settings 46 s later, at unlock. 24 lookups were blocked and none failed.
 - **Found:** on device on 2026-10-25, from a log archive.
 
 iOS starts the on-demand tunnel before the first unlock, when App Group data
