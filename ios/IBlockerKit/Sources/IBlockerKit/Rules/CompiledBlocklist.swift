@@ -30,11 +30,23 @@ public enum CompiledBlocklist {
         return data
     }
 
+    /// Options used to write the blobs: atomic so the tunnel never sees a
+    /// half-written file, and (on Apple platforms) without data protection so
+    /// the tunnel, which iOS can start before the first unlock, can read them.
+    /// The blobs hold only 64-bit hashes, never readable domains.
+    public static var writingOptions: Data.WritingOptions {
+        #if canImport(Darwin)
+        return [.atomic, .noFileProtection]
+        #else
+        return [.atomic]
+        #endif
+    }
+
     /// Atomically writes the compiled blob so the tunnel never sees a
     /// half-written file.
     public static func write(hashes: some Collection<UInt64>, generation: UInt32, to url: URL) throws {
         let data = serialize(hashes: hashes, generation: generation)
-        try data.write(to: url, options: .atomic)
+        try data.write(to: url, options: writingOptions)
     }
 
     private static func appendU32(_ data: inout Data, _ value: UInt32) {
