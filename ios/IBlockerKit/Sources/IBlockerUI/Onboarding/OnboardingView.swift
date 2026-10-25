@@ -32,12 +32,9 @@ public struct OnboardingView: View {
             symbol: "shield.lefthalf.filled",
             title: "Block ads everywhere",
             text: """
-            Personal AdBlocker runs a tiny VPN that never leaves your device. \
-            It looks at one thing only — DNS lookups — and answers the ones \
-            that belong to ad and tracking networks with "nothing here".
-
-            Every app benefits, not just Safari. No subscription, no account, \
-            no traffic sent anywhere.
+            Personal AdBlocker runs a local VPN that never leaves your device. \
+            It analyzes your DNS lookups and matches them against the \
+            contents of your block lists.
             """
         ) {
             Button("Continue") { withAnimation { step = 1 } }
@@ -85,9 +82,9 @@ public struct OnboardingView: View {
             symbol: "power.circle",
             title: "Turn it on",
             text: """
-            iOS will ask permission to add a VPN configuration — that's the \
+            iOS will ask permission to add a VPN configuration for the \
             on-device filter. Nothing is routed through third-party servers; \
-            only DNS lookups are inspected, locally.
+            only DNS lookups are inspected locally.
             """
         ) {
             if tunnel.state == .connected {
