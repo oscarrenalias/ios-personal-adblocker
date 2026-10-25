@@ -22,6 +22,12 @@ public struct CircuitBreaker: Sendable {
     /// Increments on every trip and every reset.
     public private(set) var generation: Int = 0
 
+    /// A probe has been handed out and its result is not in yet.
+    private var probeInFlight = false
+    private var probeStartedAt: Date?
+    /// A network change asked for an immediate probe regardless of state.
+    private var immediateProbePending = false
+
     private let name: String
     private let effect: String
     private let failureThreshold: Int
@@ -56,6 +62,69 @@ public struct CircuitBreaker: Sendable {
         case .healthy: return true
         case .down(let nextProbeAt, _, _): return now() >= nextProbeAt
         }
+    }
+
+    /// Returns true when the caller should start a probe now, and marks it in flight.
+    /// Exactly one probe runs at a time: down with `now >= nextProbeAt`, or an
+    /// immediate probe requested by `networkChange()`. The caller tags the probe
+    /// result with `generation` as read right after this returns true.
+    public mutating func probeDue(_ now: Date) -> Bool {
+        guard !probeInFlight else { return false }
+        let due: Bool
+        if immediateProbePending {
+            due = true
+        } else if case .down(let nextProbeAt, _, _) = state {
+            due = now >= nextProbeAt
+        } else {
+            due = false
+        }
+        guard due else { return false }
+        immediateProbePending = false
+        probeInFlight = true
+        probeStartedAt = now
+        Self.log.info("probe of alternative resolver \(name) started")
+        return true
+    }
+
+    /// Records a successful probe. Ignored if the generation is stale.
+    public mutating func probeSucceeded(generation: Int) {
+        guard generation == self.generation else { return }
+        logProbeEnd("succeeded", error: nil)
+        probeInFlight = false
+        recordSuccess(generation: generation)
+    }
+
+    /// Records a failed probe. Ignored if the generation is stale.
+    public mutating func probeFailed(generation: Int, error: String) {
+        guard generation == self.generation else { return }
+        probeInFlight = false
+        recordFailure(generation: generation)
+        logProbeEnd("failed", error: error)
+    }
+
+    /// The network changed: forget past failures, drop any in-flight probe result
+    /// and request one immediate probe. That probe's failure counts as a single
+    /// failure, so it cannot trip the breaker on its own. The router only calls
+    /// this when the alternative is enabled.
+    public mutating func networkChange() {
+        generation += 1
+        state = .healthy(consecutiveFailures: 0)
+        probeInFlight = false
+        probeStartedAt = nil
+        immediateProbePending = true
+        Self.log.info("alternative resolver \(name) breaker reset by network change (generation \(generation))")
+    }
+
+    private mutating func logProbeEnd(_ outcome: String, error: String?) {
+        let duration = probeStartedAt.map { now().timeIntervalSince($0) } ?? 0
+        probeStartedAt = nil
+        var message = "probe of alternative resolver \(name) \(outcome) after \(Int((duration * 1000).rounded())) ms"
+        if let error { message += ": \(error)" }
+        if case .down(let nextProbeAt, _, _) = state {
+            let wait = max(0, nextProbeAt.timeIntervalSince(now()))
+            message += "; next probe in \(Int(wait.rounded())) s"
+        }
+        Self.log.info(message)
     }
 
     public mutating func recordSuccess(generation: Int) {
