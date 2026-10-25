@@ -23,7 +23,8 @@ public struct UpstreamConfig: Codable, Sendable, Equatable {
         self.udpAddress = udpAddress
     }
 
-    /// Cloudflare via IP-literal DoH: fast, neutral, no bootstrap lookup.
+    /// Network DNS: resolves via the current network's own DNS on the physical
+    /// interface (no fixed third-party resolver).
     public static let `default` = UpstreamConfig(kind: .network)
 
     public var displayName: String {

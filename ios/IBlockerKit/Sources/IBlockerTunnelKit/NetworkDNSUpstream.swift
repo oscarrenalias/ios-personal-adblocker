@@ -28,7 +28,8 @@ public struct NetworkDNSUpstream: DNSUpstream {
         } catch {
             throw UpstreamError.badResponse
         }
-        guard let index = interfaceIndex() else {
+        // Index 0 is kDNSServiceInterfaceIndexAny, which could route via the tunnel.
+        guard let index = interfaceIndex(), index != 0 else {
             throw UpstreamError.connectionFailed("no network interface")
         }
 
@@ -36,20 +37,14 @@ public struct NetworkDNSUpstream: DNSUpstream {
                                    klass: parsed.qclass, interfaceIndex: index, timeout: timeout)
         let outcome = try await session.run()
         switch outcome {
-        case .records(let records):
-            return DNSResponseBuilder.response(for: parsed, rcode: 0, records: records)
-        case .nxdomain:
-            return DNSResponseBuilder.response(for: parsed, rcode: 3, records: [])
-        case .nodata:
-            return DNSResponseBuilder.response(for: parsed, rcode: 0, records: [])
+        case .answer(let rcode, let records):
+            return DNSResponseBuilder.response(for: parsed, rcode: rcode, records: records)
         }
     }
 }
 
 private enum QueryOutcome {
-    case records([DNSResponseBuilder.ResourceRecord])
-    case nxdomain
-    case nodata
+    case answer(rcode: UInt8, records: [DNSResponseBuilder.ResourceRecord])
 }
 
 /// One in-flight dns_sd query. All mutable state is touched only on `queue`.
@@ -62,7 +57,7 @@ private final class QuerySession: @unchecked Sendable {
     private let queue = DispatchQueue(label: "NetworkDNSUpstream.query")
 
     private var serviceRef: DNSServiceRef?
-    private var records: [DNSResponseBuilder.ResourceRecord] = []
+    private var completion: DNSQueryCompletion
     private var continuation: CheckedContinuation<QueryOutcome, Error>?
     private var selfRetain: Unmanaged<QuerySession>?
     private var finished = false
@@ -73,6 +68,7 @@ private final class QuerySession: @unchecked Sendable {
         self.klass = klass
         self.interfaceIndex = interfaceIndex
         self.timeout = timeout
+        self.completion = DNSQueryCompletion(qtype: type)
     }
 
     func run() async throws -> QueryOutcome {
@@ -133,19 +129,25 @@ private final class QuerySession: @unchecked Sendable {
         if errorCode != kDNSServiceErr_NoError {
             switch errorCode {
             case DNSServiceErrorType(kDNSServiceErr_NoSuchName):
-                finish(.success(.nxdomain))
+                apply(completion.negative(.noSuchName))
             case DNSServiceErrorType(kDNSServiceErr_NoSuchRecord):
-                finish(.success(.nodata))
+                apply(completion.negative(.noSuchRecord))
             default:
                 finish(.failure(UpstreamError.connectionFailed("dns_sd error \(errorCode)")))
             }
             return
         }
         if flags & DNSServiceFlags(kDNSServiceFlagsAdd) != 0 {
-            records.append(.init(name: Self.wireName(owner), type: type, class: klass, ttl: ttl, rdata: rdata))
+            completion.recordAdded(.init(name: Self.wireName(owner), type: type, class: klass, ttl: ttl, rdata: rdata))
         }
-        if flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) == 0, !records.isEmpty {
-            finish(.success(.records(records)))
+        if flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) == 0 {
+            apply(completion.batchEnded())
+        }
+    }
+
+    private func apply(_ decision: DNSQueryCompletion.Decision) {
+        if case .complete(let rcode, let records) = decision {
+            finish(.success(.answer(rcode: rcode, records: records)))
         }
     }
 
