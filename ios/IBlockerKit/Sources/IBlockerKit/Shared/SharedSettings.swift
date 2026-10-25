@@ -111,15 +111,29 @@ public struct SharedSettings: @unchecked Sendable {
         get {
             if let data = defaults.data(forKey: Keys.resolverSettings),
                let settings = try? JSONDecoder().decode(ResolverSettings.self, from: data) {
-                return settings
+                return Self.migratingOldQuad9(settings)
             }
-            return migratedResolverSettings()
+            return Self.migratingOldQuad9(migratedResolverSettings())
         }
         nonmutating set {
             if let data = try? JSONEncoder().encode(newValue) {
                 defaults.set(data, forKey: Keys.resolverSettings)
             }
         }
+    }
+
+    /// Former Quad9 DoH endpoint (non-standard port). Read-time migration only.
+    private static let oldQuad9DoHURL = "https://9.9.9.9:5053/dns-query"
+
+    /// Swaps the old Quad9 DoH alternative for the current Quad9 preset on
+    /// read; other fields and other URLs are left alone, nothing is written.
+    private static func migratingOldQuad9(_ settings: ResolverSettings) -> ResolverSettings {
+        guard settings.alternative.kind == .doh,
+              settings.alternative.dohURL == oldQuad9DoHURL else { return settings }
+        var migrated = settings
+        migrated.alternative = UpstreamPreset.quad9.config
+        migrated.alternativeName = UpstreamPreset.quad9.name
+        return migrated
     }
 
     private func migratedResolverSettings() -> ResolverSettings {
