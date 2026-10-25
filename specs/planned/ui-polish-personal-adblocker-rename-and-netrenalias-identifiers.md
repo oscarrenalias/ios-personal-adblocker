@@ -5,14 +5,14 @@ description: "Remove Verify from Dashboard, rename to Personal AdBlocker, move i
 dependencies: null
 priority: medium
 complexity: null
-status: draft
+status: planned
 tags:
 - ui
 - branding
 scope:
   in: null
   out: null
-feature_root_id: null
+feature_root_id: B-8e60a908
 ---
 # UI polish, Personal AdBlocker rename and net.renalias identifiers
 

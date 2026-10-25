@@ -30,7 +30,7 @@ worth knowing.
 - **Status:** fixed, in two parts:
   1. [`spec-4cb10c45`](../specs/done/network-dns-as-the-default-resolver.md):
      network DNS as the default. Done and verified on device on 2026-10-25.
-  2. [`spec-c7e3c45d`](../specs/planned/alternative-resolver-with-failover-to-network-dns.md):
+  2. [`spec-c7e3c45d`](../specs/done/alternative-resolver-with-failover-to-network-dns.md):
      alternative resolver with failover (`ResolverRouter`, circuit breaker,
      fallback policy). Implemented; the manual device checks below are still
      to do.
@@ -217,7 +217,7 @@ nothing coordinating them. Unlikely to cause problems, but not safe.
 
 ### KI-15: `.local` lookups through Network DNS time out after 3 s
 
-- **Status:** fixed by [`spec-c7e3c45d`](../specs/planned/alternative-resolver-with-failover-to-network-dns.md);
+- **Status:** fixed by [`spec-c7e3c45d`](../specs/done/alternative-resolver-with-failover-to-network-dns.md);
   device check 22 (see KI-1) is still to do. Found on device on 2026-10-25
   (pymobiledevice3 capture).
 - **Where:** `ios/IBlockerKit/Sources/IBlockerTunnelKit/NetworkDNSUpstream.swift`

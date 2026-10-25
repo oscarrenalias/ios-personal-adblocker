@@ -5,7 +5,7 @@ description: "Tunnel side of KI-1 part 2: ResolverRouter with circuit breaker, f
 dependencies: null
 priority: high
 complexity: null
-status: planned
+status: done
 tags:
 - dns
 - tunnel

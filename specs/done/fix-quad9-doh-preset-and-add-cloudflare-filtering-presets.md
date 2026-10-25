@@ -5,7 +5,7 @@ description: "Quad9 DoH preset to port 443 (5053 times out), migrate stored old 
 dependencies: null
 priority: medium
 complexity: null
-status: planned
+status: done
 tags:
 - dns
 - presets
