@@ -39,11 +39,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Builds the upstream; `.network` is backed by the live path-monitor
     /// interface so Wi-Fi ↔ cellular switches apply without a tunnel restart.
     private func makeUpstream(_ config: UpstreamConfig) -> DNSUpstream? {
-        if config.kind == .network {
-            let box = physicalInterface
-            return NetworkDNSUpstream(interfaceIndex: { box.get() })
-        }
-        return UpstreamFactory.make(config)
+        let box = physicalInterface
+        return UpstreamFactory.make(config, interfaceIndex: { box.get() })
     }
 
     /// Tracks the first Wi-Fi / cellular / wired interface. `.other` is
