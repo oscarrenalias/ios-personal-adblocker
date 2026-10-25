@@ -241,7 +241,13 @@ public struct SettingsView: View {
     private func apply(_ config: UpstreamConfig) {
         upstream = config
         AppEnvironment.settings.upstreamConfig = config
-        Task { await tunnel.setUpstream(config) }
+        let settings = ResolverSettings(
+            useAlternative: config.kind != .network,
+            alternative: config,
+            alternativeName: config.displayName,
+            fallbackPolicy: .networkDNS
+        )
+        Task { await tunnel.setResolverSettings(settings) }
     }
 
     private func refreshContentBlocker() {

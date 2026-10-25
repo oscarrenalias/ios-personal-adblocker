@@ -191,13 +191,8 @@ public final class TunnelController {
         _ = await send(.reloadRules)
     }
 
-    public func setUpstream(_ config: UpstreamConfig) async {
-        _ = await send(.setResolverSettings(ResolverSettings(
-            useAlternative: config.kind != .network,
-            alternative: config,
-            alternativeName: config.displayName,
-            fallbackPolicy: .networkDNS
-        )))
+    public func setResolverSettings(_ settings: ResolverSettings) async {
+        _ = await send(.setResolverSettings(settings))
     }
 
     // MARK: - Pause
