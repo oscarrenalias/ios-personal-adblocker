@@ -8,11 +8,14 @@ public struct SettingsView: View {
     @Environment(FilterListsViewModel.self) private var lists
     @State private var upstream = AppEnvironment.settings.upstreamConfig
     @State private var logEnabled = AppEnvironment.settings.queryLogEnabled
+    @State private var verboseLogging = AppEnvironment.settings.verboseLoggingUntil != nil
     @State private var relayStrategy = AppEnvironment.settings.relayStrategy
     @State private var customDoHURL = ""
     @State private var customUDPAddress = ""
     @State private var blockerStatus: String?
     @State private var blockerBusy = false
+
+    private static let log = Log(category: "settings")
 
     public init() {}
 
@@ -145,6 +148,13 @@ public struct SettingsView: View {
                     Text("The log never leaves this device. Turning it off takes effect the next time the tunnel starts.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Toggle("Verbose logging (1 hour)", isOn: $verboseLogging)
+                        .onChange(of: verboseLogging) { _, value in
+                            setVerboseLogging(value)
+                        }
+                    Text("Shows per-lookup details, including domain names, in Console.app / Xcode while streaming from this device. Turns itself off after an hour.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("About") {
@@ -158,6 +168,9 @@ public struct SettingsView: View {
             .onAppear {
                 // The Blocking Test screen can switch the strategy too.
                 relayStrategy = AppEnvironment.settings.relayStrategy
+                // Reads as off once the hour has passed.
+                verboseLogging = AppEnvironment.settings.verboseLoggingUntil != nil
+                Log.setVerbose(verboseLogging)
             }
         }
     }
@@ -211,6 +224,18 @@ public struct SettingsView: View {
         let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
         return "\(short) (\(build))"
+    }
+
+    private func setVerboseLogging(_ on: Bool) {
+        let until = on ? Date().addingTimeInterval(3600) : nil
+        guard (AppEnvironment.settings.verboseLoggingUntil != nil) != on else { return }
+        AppEnvironment.settings.verboseLoggingUntil = until
+        Log.setVerbose(on)
+        if let until {
+            Self.log.notice("verbose logging turned on until \(until.formatted(.iso8601))")
+        } else {
+            Self.log.notice("verbose logging turned off")
+        }
     }
 
     private func apply(_ config: UpstreamConfig) {
