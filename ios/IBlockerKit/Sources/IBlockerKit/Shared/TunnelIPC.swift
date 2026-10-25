@@ -27,6 +27,9 @@ public struct UpstreamConfig: Codable, Sendable, Equatable {
     /// interface (no fixed third-party resolver).
     public static let `default` = UpstreamConfig(kind: .network)
 
+    /// True only for DoH; UDP and network DNS are unencrypted.
+    public var isEncrypted: Bool { kind == .doh }
+
     public var displayName: String {
         switch kind {
         case .doh: return dohURL ?? "DoH"

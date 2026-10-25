@@ -15,6 +15,43 @@ public enum RelayStrategy: String, CaseIterable, Sendable {
     case autoSuspend
 }
 
+/// What the router does when the chosen upstream can't answer a query.
+public enum FallbackPolicy: String, Codable, CaseIterable, Sendable, Equatable {
+    /// Retry via the current network's own DNS.
+    case networkDNS
+    /// Don't fall back; the query fails.
+    case none
+}
+
+/// User's resolver choice: network DNS by default, optionally an alternative
+/// encrypted resolver, plus what to do when that resolver fails.
+public struct ResolverSettings: Codable, Sendable, Equatable {
+    public var useAlternative: Bool
+    public var alternative: UpstreamConfig
+    public var alternativeName: String
+    public var fallbackPolicy: FallbackPolicy
+
+    public init(
+        useAlternative: Bool,
+        alternative: UpstreamConfig,
+        alternativeName: String,
+        fallbackPolicy: FallbackPolicy
+    ) {
+        self.useAlternative = useAlternative
+        self.alternative = alternative
+        self.alternativeName = alternativeName
+        self.fallbackPolicy = fallbackPolicy
+    }
+
+    /// Alternative off; Cloudflare DoH preselected for when it is enabled.
+    public static let `default` = ResolverSettings(
+        useAlternative: false,
+        alternative: UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.1/dns-query"),
+        alternativeName: "Cloudflare",
+        fallbackPolicy: .networkDNS
+    )
+}
+
 /// Typed accessors over the App Group's shared UserDefaults.
 /// UserDefaults is documented thread-safe, hence the unchecked conformance.
 public struct SharedSettings: @unchecked Sendable {
