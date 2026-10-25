@@ -29,6 +29,8 @@ public final class TunnelController {
 
     private var manager: NETunnelProviderManager?
     private var statusObserver: NSObjectProtocol?
+    private var statsAvailable: Bool?
+    private static let log = Log(category: "ipc")
 
     public init() {
         statusObserver = NotificationCenter.default.addObserver(
@@ -126,15 +128,38 @@ public final class TunnelController {
     // MARK: - IPC
 
     public func send(_ request: TunnelRequest) async -> TunnelResponse? {
-        guard let session = manager?.connection as? NETunnelProviderSession,
-              manager?.connection.status == .connected,
-              let data = try? TunnelIPCCoder.encode(request) else { return nil }
+        guard let session = manager?.connection as? NETunnelProviderSession else {
+            Self.log.debug("ipc \(request): no tunnel session (manager \(manager == nil ? "nil" : "not a provider session"))")
+            return nil
+        }
+        guard session.status == .connected else {
+            Self.log.debug("ipc \(request): tunnel status is \(session.status.rawValue), not connected")
+            return nil
+        }
+        let data: Data
+        do {
+            data = try TunnelIPCCoder.encode(request)
+        } catch {
+            Self.log.error("ipc \(request): encode failed: \(error)")
+            return nil
+        }
         return await withCheckedContinuation { continuation in
             do {
                 try session.sendProviderMessage(data) { reply in
-                    continuation.resume(returning: reply.flatMap { try? TunnelIPCCoder.decodeResponse($0) })
+                    guard let reply else {
+                        Self.log.debug("ipc \(request): nil reply from tunnel")
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    do {
+                        continuation.resume(returning: try TunnelIPCCoder.decodeResponse(reply))
+                    } catch {
+                        Self.log.error("ipc \(request): undecodable reply (\(reply.count) bytes): \(error)")
+                        continuation.resume(returning: nil)
+                    }
                 }
             } catch {
+                Self.log.error("ipc \(request): sendProviderMessage threw: \(error)")
                 continuation.resume(returning: nil)
             }
         }
@@ -143,6 +168,22 @@ public final class TunnelController {
     public func refreshStats() async {
         if case .stats(let stats)? = await send(.getStats) {
             runtimeStats = stats
+            noteStatsAvailability(true)
+        } else {
+            // Stale numbers from a previous tunnel session must not linger.
+            runtimeStats = nil
+            noteStatsAvailability(false)
+        }
+    }
+
+    /// Logs only on transitions; refreshStats polls every few seconds.
+    private func noteStatsAvailability(_ available: Bool) {
+        guard statsAvailable != available else { return }
+        statsAvailable = available
+        if available {
+            Self.log.notice("tunnel stats available")
+        } else {
+            Self.log.notice("tunnel stats unavailable (state \(String(describing: state)))")
         }
     }
 
