@@ -14,7 +14,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private static let pathLog = Log(category: "path")
 
     private var engine: DNSProxyEngine?
-    private var router: ResolverRouter?
+    /// Read from the path monitor queue (networkChanged) and written on
+    /// start / IPC / recovery, so it lives behind a lock.
+    private let routerBox = LockedBox<ResolverRouter?>(nil)
+    private var router: ResolverRouter? {
+        get { routerBox.withValue { $0 } }
+        set { routerBox.withValue { $0 = newValue } }
+    }
     private var paths: AppGroupPaths?
     private var maintenanceTask: Task<Void, Never>?
     private var pathMonitor: NWPathMonitor?
@@ -82,6 +88,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private func startPathMonitor() {
         pathMonitor?.cancel()
         let box = physicalInterface
+        let routerBox = routerBox
         let monitor = NWPathMonitor()
         // Only touched from the path monitor queue.
         var previous: String = "none"
@@ -94,6 +101,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if current != previous {
                 Self.pathLog.info("selected interface \(previous) → \(current), path status \(String(describing: path.status))")
                 previous = current
+                // Only a selected-interface change resets the router's
+                // network-DNS state (circuit breaker / probe).
+                routerBox.withValue { $0 }?.networkChanged()
             }
             if selected == nil {
                 let types = path.availableInterfaces.map { String(describing: $0.type) }.joined(separator: ", ")
@@ -119,7 +129,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         let settings = SharedSettings(groupID: groupID)
         let settingsReadable = settings?.settingsAvailable ?? false
-        let resolverSettings = settings?.resolverSettings ?? .default
+        // While settings are unreadable (before first unlock) start with
+        // defaults (alternative off); the recovery tick rebuilds the router.
+        let resolverSettings = settingsReadable ? (settings?.resolverSettings ?? .default) : .default
         startPathMonitor()
         guard let router = makeRouter(resolverSettings, source: "start") else {
             pathMonitor?.cancel()
