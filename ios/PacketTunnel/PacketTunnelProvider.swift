@@ -103,6 +103,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             configuration: .init(logEnabled: settings?.queryLogEnabled ?? true)
         )
         await engine.setPaused(until: settings?.pausedUntil)
+        Self.applyVerbose(until: settings?.verboseLoggingUntil)
         self.engine = engine
 
         let networkSettings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
@@ -246,6 +247,19 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     // MARK: - Maintenance
 
+    /// Syncs the process-wide verbose flag with the shared setting and logs
+    /// a notice when it changes.
+    private static func applyVerbose(until: Date?) {
+        let on = until != nil
+        guard on != Log.isVerbose else { return }
+        Log.setVerbose(on)
+        if let until {
+            log.notice("verbose logging on until \(until.formatted(.iso8601))")
+        } else {
+            log.notice("verbose logging off")
+        }
+    }
+
     /// Flushes the log/stats every 2 s and picks up recompiled blocklists
     /// even if the app's reload IPC never arrives (e.g. app was killed).
     private func startMaintenance(paths: AppGroupPaths) {
@@ -262,6 +276,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 // propagates within one tick.
                 if let groupID, let settings = SharedSettings(groupID: groupID) {
                     await engine.setPaused(until: settings.pausedUntil)
+                    Self.applyVerbose(until: settings.verboseLoggingUntil)
                 }
 
                 tick += 1

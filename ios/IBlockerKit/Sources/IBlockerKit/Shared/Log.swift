@@ -16,6 +16,34 @@ import os
 public struct Log: Sendable {
     public static let subsystem = "com.iblocker"
 
+    /// Process-wide "verbose logging" switch (Settings ▸ Verbose logging).
+    /// iOS keeps `debug` out of third-party subsystems by default and a
+    /// logging profile may be rejected, so while this is on, `debug`
+    /// messages that OSLog would drop are emitted at `info` instead, prefixed
+    /// with `[verbose] `. Thread-safe.
+    public static var isVerbose: Bool { verboseFlag.get() }
+
+    public static func setVerbose(_ on: Bool) {
+        verboseFlag.set(on)
+    }
+
+    private static let verboseFlag = VerboseFlag()
+
+    private final class VerboseFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+
+        func get() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return value
+        }
+
+        func set(_ newValue: Bool) {
+            lock.lock(); defer { lock.unlock() }
+            value = newValue
+        }
+    }
+
     #if canImport(os)
     private let logger: Logger
     private let osLog: OSLog
@@ -70,9 +98,13 @@ public struct Log: Sendable {
 
     public func debug(_ message: @autoclosure () -> String) {
         #if canImport(os)
-        guard isEnabled(.debug) else { return }
-        let text = message()
-        logger.debug("\(text, privacy: .public)")
+        if isEnabled(.debug) {
+            let text = message()
+            logger.debug("\(text, privacy: .public)")
+        } else if Log.isVerbose, isEnabled(.info) {
+            let text = message()
+            logger.info("[verbose] \(text, privacy: .public)")
+        }
         #endif
     }
 }

@@ -42,8 +42,9 @@ path changes) using the same wrapper.
 | `debug` | Per-query and step-by-step detail | each lookup's verdict and which upstream answered it, upstream timing, raw `dns_sd` results, retry decisions |
 
 - **Never log per query above `debug`.** There can be hundreds of lookups a
-  minute. `info` and above are stored on the device, so logging every query
-  there costs battery and storage.
+  minute. By default on iOS, `info` messages are kept in memory only (visible
+  while streaming) and `notice` and `error` are persisted to disk, so
+  logging every query at `notice` or above costs battery and storage.
 - Log **both sides** of anything that can fail or hang: started → succeeded
   or failed, with the duration where it matters (upstream queries, list
   downloads).
@@ -55,6 +56,9 @@ path changes) using the same wrapper.
 - Domain names and IP addresses reveal browsing activity. Log them **only at
   `debug` level**, marked `privacy: .public`. Debug messages are kept in memory
   only and are visible while streaming logs; they aren't written to disk.
+  Verbose mode (below) re-emits them at `info`, which is also in-memory only
+  with the device's default logging configuration, so domain names stay out
+  of persisted logs.
 - At `info` and above, don't log domain names. Log counts, types, states and
   error codes instead.
 - Resolver names and URLs (Cloudflare, `https://1.1.1.1/dns-query`) and
@@ -69,6 +73,24 @@ path changes) using the same wrapper.
 - **Xcode:** messages from the app show in the debug console while running
   from Xcode. For the tunnel extension, use Console.app, since the extension
   runs in its own process.
+
+## Seeing debug messages on a device
+
+iOS doesn't record `debug` messages for our subsystem by default, and a
+logging configuration profile (`com.apple.system.logging`) may be rejected by
+the device. Use the in-app switch instead:
+
+1. Turn on **Settings ▸ Privacy ▸ Verbose logging (1 hour)**. It turns itself
+   off after an hour. The tunnel picks the change up within about 2 s, with
+   no restart.
+2. Stream in Console.app with **Action ▸ Include Info Messages** on and filter
+   on `subsystem:com.iblocker`.
+3. Look for lines prefixed `[verbose]`. These are the `debug` messages
+   (per-query verdicts, network-dns query start/complete, upstream errors),
+   emitted at `info` level while verbose mode is on.
+
+The tunnel logs a `notice` when verbose mode turns on or off (with the expiry
+time), and so does the app when the toggle changes.
 
 ## In specs
 

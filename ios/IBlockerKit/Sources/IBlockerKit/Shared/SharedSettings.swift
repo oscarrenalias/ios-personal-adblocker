@@ -26,6 +26,7 @@ public struct SharedSettings: @unchecked Sendable {
         public static let relayStrategy = "relayStrategy"
         public static let pausedUntil = "pausedUntil"
         public static let protectionActive = "protectionActive"
+        public static let verboseLoggingUntil = "verboseLoggingUntil"
     }
 
     private let defaults: UserDefaults
@@ -100,6 +101,21 @@ public struct SharedSettings: @unchecked Sendable {
         }
         nonmutating set {
             defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: Keys.pausedUntil)
+        }
+    }
+
+    /// While in the future, `Log.debug` messages are also emitted at info
+    /// level (prefixed `[verbose]`) so they show in Console.app without a
+    /// logging profile. A past date reads as nil.
+    public var verboseLoggingUntil: Date? {
+        get {
+            let t = defaults.double(forKey: Keys.verboseLoggingUntil)
+            guard t > 0 else { return nil }
+            let date = Date(timeIntervalSince1970: t)
+            return date > Date() ? date : nil
+        }
+        nonmutating set {
+            defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: Keys.verboseLoggingUntil)
         }
     }
 

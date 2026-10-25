@@ -33,6 +33,23 @@ final class LogTests: XCTestCase {
         XCTAssertEqual(counter.value, 4)
     }
 
+    func testVerboseDebugEvaluatedWhenDebugDisabledButInfoEnabled() {
+        Log.setVerbose(true)
+        defer { Log.setVerbose(false) }
+        let counter = Counter()
+        let log = Log(category: "test") { $0 != .debug }
+        log.debug(text(counter))
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    func testVerboseOffDebugNotEvaluatedWhenDebugDisabled() {
+        Log.setVerbose(false)
+        let counter = Counter()
+        let log = Log(category: "test") { $0 != .debug }
+        log.debug(text(counter))
+        XCTAssertEqual(counter.value, 0)
+    }
+
     func testOnlyMatchingLevelIsGated() {
         let counter = Counter()
         let log = Log(category: "test") { $0 != .debug }

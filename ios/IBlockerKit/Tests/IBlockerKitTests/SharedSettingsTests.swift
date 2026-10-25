@@ -9,6 +9,22 @@ final class SharedSettingsTests: XCTestCase {
         return (SharedSettings(defaults: defaults), suite)
     }
 
+    func testVerboseLoggingUntilRoundTripAndExpiry() {
+        let (settings, suite) = makeSettings()
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+
+        XCTAssertNil(settings.verboseLoggingUntil)
+        let future = Date().addingTimeInterval(3600)
+        settings.verboseLoggingUntil = future
+        XCTAssertEqual(settings.verboseLoggingUntil?.timeIntervalSince1970 ?? 0,
+                       future.timeIntervalSince1970, accuracy: 0.001)
+        settings.verboseLoggingUntil = Date().addingTimeInterval(-1)
+        XCTAssertNil(settings.verboseLoggingUntil)
+        settings.verboseLoggingUntil = future
+        settings.verboseLoggingUntil = nil
+        XCTAssertNil(settings.verboseLoggingUntil)
+    }
+
     func testRelayStrategyDefaultsToBlockDomains() {
         let (settings, suite) = makeSettings()
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
