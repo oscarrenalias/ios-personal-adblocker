@@ -5,7 +5,7 @@ description: Show encryption/fallback state in the existing Dashboard status lin
 dependencies: null
 priority: high
 complexity: null
-status: draft
+status: planned
 tags:
 - dns
 - ui
@@ -13,7 +13,7 @@ tags:
 scope:
   in: null
   out: null
-feature_root_id: null
+feature_root_id: B-a13ff8ff
 ---
 # Encryption status in the Dashboard status line
 

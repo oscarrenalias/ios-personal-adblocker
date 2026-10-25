@@ -5,14 +5,14 @@ description: "Quad9 DoH preset to port 443 (5053 times out), migrate stored old 
 dependencies: null
 priority: medium
 complexity: null
-status: draft
+status: planned
 tags:
 - dns
 - presets
 scope:
   in: null
   out: null
-feature_root_id: null
+feature_root_id: B-b602aed6
 ---
 # Fix Quad9 DoH preset and add Cloudflare filtering presets
 
