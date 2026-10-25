@@ -184,6 +184,24 @@ On device (manual, by the user, after merge; gates planning of part 2):
     protection.
 12. Switching between Network DNS and Cloudflare (DoH) in Settings takes
     effect without restarting protection.
+13. The events listed in the Logging section are logged at the stated levels,
+    and no domain name is logged above `debug`.
+
+## Logging
+
+Per [docs/LOGGING.md](../../docs/LOGGING.md). Subsystem `com.iblocker`.
+
+| Category | Level | Event |
+|---|---|---|
+| `tunnel` | `notice` | tunnel up (rule count, upstream name), tunnel stopping, `setUpstream` applied |
+| `tunnel` | `error` | invalid upstream config at start, `setUpstream` failed (kind, reason) |
+| `path` | `info` | selected interface changed (old → new, path status) |
+| `path` | `notice` | no usable physical interface (path status, interface types) |
+| `engine` | `info` | rules reloaded (blocked entry count, generation), upstream switched |
+| `engine` | `debug` | per-query verdict (blocked, allowed with duration, failed with SERVFAIL), truncated or dropped oversize answers, in-flight limit hits |
+| `network-dns` | `debug` | query start (interface index), complete (rcode, record and CNAME counts, duration), failed, timed out, rejected, `dns_sd` errors |
+
+Domain names appear only at `debug`.
 
 ## Scope
 

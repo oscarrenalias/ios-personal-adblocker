@@ -20,12 +20,13 @@ from the logs alone.
   `network-dns`, `path`, `lists`, `settings`, `ui`.
 - `IBlockerKit` must still compile and test on Linux, where `os` isn't
   available. Code there logs through a small wrapper in `IBlockerKit` that
-  uses `os.Logger` on Apple platforms and does nothing on Linux. Create the
-  wrapper the first time it's needed, and reuse it after that.
+  uses `os.Logger` on Apple platforms and does nothing on Linux. The wrapper
+  is `Log` (`IBlockerKit/Shared/Log.swift`). Create one per component with
+  `Log(category: "engine")` and call `error`, `notice`, `info` or `debug`.
+  Messages are logged `privacy: .public`.
 
-The existing tunnel logger (`PacketTunnelProvider`, subsystem
-`com.iblocker.tunnel`) moves to subsystem `com.iblocker`, category `tunnel`,
-the next time that file is changed.
+`PacketTunnelProvider` logs under category `tunnel` (and `path` for network
+path changes) using the same wrapper.
 
 ## Levels
 
