@@ -27,8 +27,12 @@ worth knowing.
 
 ### KI-1: No fallback when the DNS resolver is unreachable
 
-- **Status:** spec written:
-  [`spec-a5bcca33`](../specs/drafts/network-dns-fallback-with-optional-alternative-resolver.md)
+- **Status:** specs written, in two parts:
+  1. [`spec-4cb10c45`](../specs/drafts/network-dns-as-the-default-resolver.md):
+     network DNS as the default. Also the on-device feasibility check.
+  2. [`spec-c7e3c45d`](../specs/drafts/alternative-resolver-with-failover-to-network-dns.md):
+     alternative resolver with failover. Plan it only after part 1 is
+     verified on device.
 - **Severity note:** real but rare in practice. Lockdown has the same
   weakness (one Cloudflare DoH server, no fallback) and works fine day to day.
   It's kept first because the fix also adds network DNS as the default.
