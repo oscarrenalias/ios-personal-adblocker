@@ -16,8 +16,10 @@ address of a server such as `ads.example.com`:
 
 - If the name is on a blocklist, the app answers "nowhere" (`0.0.0.0`), so the
   ad never loads.
-- Otherwise it passes the lookup on to a DNS resolver you choose. That uses
-  encrypted DNS (DNS over HTTPS) by default.
+- Otherwise it passes the lookup on to a DNS resolver. By default this is
+  **Network DNS**: the resolver of the Wi-Fi or cellular network you're
+  connected to. You can switch to an encrypted DNS provider (DNS over HTTPS)
+  or a plain DNS server in Settings.
 
 All other traffic goes straight to the internet as normal, so the VPN doesn't
 slow down browsing or downloads.
@@ -100,12 +102,17 @@ More signing details are in [docs/SIGNING.md](docs/SIGNING.md).
 There's no server, account, analytics, or crash reporting. The app only
 connects to:
 
-- the DNS resolver you chose, for lookups that aren't blocked
+- the DNS resolver, for lookups that aren't blocked. By default that is the
+  resolver of your current network; if you picked a provider in Settings, it's
+  that provider
 - the blocklist websites, when it updates lists
 
 The log of lookups stays on the phone. It's a fixed-size file of about 4 MB
-that overwrites itself, and you can turn it off in Settings. Your DNS
-resolver still sees the lookups that aren't blocked.
+that overwrites itself, and you can turn it off in Settings. With the
+default Network DNS, lookups that aren't blocked are visible to your network's
+resolver (for example your home router or mobile carrier), the same as without
+the app. If you choose an encrypted DNS provider, that provider sees them
+instead.
 
 ## Project layout
 

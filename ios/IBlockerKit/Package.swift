@@ -16,7 +16,7 @@ let package = Package(
         .target(name: "IBlockerKit"),
         .target(name: "IBlockerTunnelKit", dependencies: ["IBlockerKit"]),
         .target(name: "IBlockerUI", dependencies: ["IBlockerKit"]),
-        .testTarget(name: "IBlockerKitTests", dependencies: ["IBlockerKit"]),
+        .testTarget(name: "IBlockerKitTests", dependencies: ["IBlockerKit", "IBlockerTunnelKit"]),
     ],
     swiftLanguageModes: [.v5]
 )

@@ -15,9 +15,9 @@
 │                              │   │        blocklist.bin     │     │
 │                       blocked│   │allowed                   │     │
 │                              ▼   ▼                          │     │
-│                    DNSResponseBuilder   DoH/UDP upstream ───┼──► internet
-│                    (0.0.0.0 / :: /      (IP-literal          │    (encrypted)
-│                     NODATA)              endpoint)           │     │
+│                    DNSResponseBuilder   Upstream            ─┼──► internet
+│                    (0.0.0.0 / :: /      (Network DNS default, │    (physical
+│                     NODATA)             or DoH/UDP)          │     interface)
 │                              │   │                           │     │
 │                              └───┴──► UDPReplyBuilder ──► utun ──► app
 │                              └──────────────────────────────┘     │
@@ -30,17 +30,28 @@ Key decisions:
   `fd00::2/128`. All real traffic (HTTP, video, games) never touches the
   tunnel — zero throughput cost, minimal battery cost. `NEDNSSettings` with
   `matchDomains = [""]` makes those fake resolvers the system default.
-- **No recursion**: the extension's own upstream sockets target addresses
-  outside the included routes, so they exit over the physical interface.
-  Upstream endpoints are IP literals because the extension's hostname
-  lookups would otherwise loop back into the tunnel it serves.
+- **Network DNS is the default upstream**: `NetworkDNSUpstream` resolves
+  allowed queries with `DNSServiceQueryRecord`, bound to the physical
+  interface index supplied by an `NWPathMonitor` in `PacketTunnelProvider`.
+  The system resolver on that interface answers with whatever DNS the current
+  Wi-Fi/cellular network hands out, and the result is rebuilt into a wire
+  response by `DNSResponseBuilder`. DoH and UDP upstreams remain as
+  user-selectable alternatives.
+- **No recursion**: interface-bound `DNSServiceQueryRecord` lookups leave via
+  the physical interface and never re-enter the tunnel. The tunnel's own DNS
+  addresses (`TunnelConstants.dnsIPv4`/`dnsIPv6`) are never used as the
+  upstream. If no usable interface is available the query fails rather than
+  falling back. For DoH/UDP upstreams, sockets target addresses outside the
+  included routes so they also exit over the physical interface; those
+  endpoints are IP literals because the extension's hostname lookups would
+  otherwise loop back into the tunnel it serves.
 - **HTTPS/SVCB answered**: type-65 queries carry `ipv4hint`/`ipv6hint` —
   a blocker that only answers A/AAAA leaks through modern Safari. Blocked
   domains get NODATA for every non-A/AAAA qtype.
 - **0x20 preserved**: responses echo the question section byte-exactly, so
   resolvers using case-randomization accept our answers.
 - **TC never set** on synthesized answers → clients never retry over TCP →
-  not serving TCP:53 is safe. With the DoH default upstream, upstream
+  not serving TCP:53 is safe. With a DoH upstream, upstream
   truncation is impossible too.
 
 ## Memory (the 50 MB extension budget)

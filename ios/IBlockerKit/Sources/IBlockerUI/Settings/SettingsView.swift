@@ -19,6 +19,7 @@ public struct SettingsView: View {
     /// Upstreams usable from inside the tunnel (IP-literal endpoints only —
     /// hostname DoH would recurse through the tunnel's own resolver).
     private static let upstreamChoices: [(name: String, config: UpstreamConfig)] = [
+        ("Network DNS (default)", UpstreamConfig(kind: .network)),
         ("Cloudflare (DoH)", UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.1/dns-query")),
         ("AdGuard DNS (DoH, extra blocking)", UpstreamConfig(kind: .doh, dohURL: "https://94.140.14.14/dns-query")),
         ("Quad9 (DoH, malware blocking)", UpstreamConfig(kind: .doh, dohURL: "https://9.9.9.9:5053/dns-query")),
@@ -94,7 +95,7 @@ public struct SettingsView: View {
                 } header: {
                     Text("Upstream DNS (VPN mode)")
                 } footer: {
-                    Text("Where non-blocked queries are resolved. Use IP-literal endpoints only — hostnames can't be resolved from inside the tunnel.")
+                    Text("Where non-blocked queries are resolved. Network DNS uses the resolver of your current Wi-Fi or cellular connection. The other choices send lookups to a specific provider. Custom endpoints must be IP literals — hostnames can't be resolved from inside the tunnel.")
                 }
 
                 Section {
