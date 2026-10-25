@@ -6,6 +6,7 @@ public struct DashboardView: View {
     @Environment(TunnelController.self) private var tunnel
     @Environment(QueryLogViewModel.self) private var log
     @State private var fileStats = BlockerStats()
+    @State private var compiledRuleCount: UInt64 = 0
 
     public init() {}
 
@@ -129,7 +130,8 @@ public struct DashboardView: View {
             )
             CounterTile(
                 title: "Rules",
-                value: ruleCount,
+                value: rulesTile.value,
+                caption: rulesTile.caption,
                 symbol: "list.number",
                 tint: .purple
             )
@@ -145,15 +147,15 @@ public struct DashboardView: View {
         max(tunnel.runtimeStats?.blockedQueries ?? 0, fileStats.totalBlocked)
     }
 
-    private var ruleCount: UInt64 {
-        if let live = tunnel.runtimeStats?.blocklistEntryCount, live > 0 { return live }
-        return UInt64((try? CompiledBlocklistView(contentsOf: AppEnvironment.paths.blocklistURL))?.count ?? 0)
+    private var rulesTile: RulesTilePresentation {
+        RulesTilePresentation(liveCount: tunnel.runtimeStats?.blocklistEntryCount, compiledCount: compiledRuleCount)
     }
 
     private func refreshLoop() async {
         while !Task.isCancelled {
             await tunnel.refreshStats()
             fileStats = StatsPersistence.load(from: AppEnvironment.paths.statsURL)
+            compiledRuleCount = UInt64((try? CompiledBlocklistView(contentsOf: AppEnvironment.paths.blocklistURL))?.count ?? 0)
             try? await Task.sleep(nanoseconds: 3_000_000_000)
         }
     }
@@ -161,7 +163,8 @@ public struct DashboardView: View {
 
 struct CounterTile: View {
     let title: String
-    let value: UInt64
+    let value: UInt64?
+    var caption: String?
     let symbol: String
     let tint: Color
 
@@ -172,10 +175,17 @@ struct CounterTile: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            Text(value.formatted(.number.notation(.compactName)))
+            Text(value?.formatted(.number.notation(.compactName)) ?? "—")
                 .font(.system(.title, design: .rounded, weight: .bold))
                 .foregroundStyle(tint)
                 .contentTransition(.numericText())
+            if let caption {
+                Text(caption)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
