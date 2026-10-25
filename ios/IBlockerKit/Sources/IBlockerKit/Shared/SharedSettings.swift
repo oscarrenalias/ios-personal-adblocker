@@ -27,6 +27,7 @@ public struct SharedSettings: @unchecked Sendable {
         public static let pausedUntil = "pausedUntil"
         public static let protectionActive = "protectionActive"
         public static let verboseLoggingUntil = "verboseLoggingUntil"
+        public static let settingsAvailableSentinel = "settingsAvailableSentinel"
     }
 
     private let defaults: UserDefaults
@@ -41,6 +42,14 @@ public struct SharedSettings: @unchecked Sendable {
         self.init(defaults: defaults)
     }
     #endif
+
+    /// Written by the app at every launch. The tunnel can start before the
+    /// first unlock, when the shared defaults are unreadable and every key
+    /// reads as unset; a missing sentinel means "not readable yet".
+    public var settingsAvailable: Bool {
+        get { defaults.bool(forKey: Keys.settingsAvailableSentinel) }
+        nonmutating set { defaults.set(newValue, forKey: Keys.settingsAvailableSentinel) }
+    }
 
     public var upstreamConfig: UpstreamConfig {
         get {
