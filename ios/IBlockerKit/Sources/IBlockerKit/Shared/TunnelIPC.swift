@@ -6,6 +6,7 @@ public struct UpstreamConfig: Codable, Sendable, Equatable {
     public enum Kind: String, Codable, Sendable {
         case doh
         case udp
+        case network
     }
 
     public var kind: Kind
@@ -23,12 +24,13 @@ public struct UpstreamConfig: Codable, Sendable, Equatable {
     }
 
     /// Cloudflare via IP-literal DoH: fast, neutral, no bootstrap lookup.
-    public static let `default` = UpstreamConfig(kind: .doh, dohURL: "https://1.1.1.1/dns-query")
+    public static let `default` = UpstreamConfig(kind: .network)
 
     public var displayName: String {
         switch kind {
         case .doh: return dohURL ?? "DoH"
         case .udp: return "\(udpAddress ?? "?"):53 (UDP)"
+        case .network: return "Network DNS"
         }
     }
 }

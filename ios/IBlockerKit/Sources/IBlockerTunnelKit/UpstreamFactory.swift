@@ -14,6 +14,9 @@ public enum UpstreamFactory {
             #else
             return nil
             #endif
+        case .network:
+            // Network DNS upstream is implemented in a follow-up bead.
+            return nil
         }
     }
 }
