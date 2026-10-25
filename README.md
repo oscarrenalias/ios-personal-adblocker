@@ -18,8 +18,17 @@ address of a server such as `ads.example.com`:
   ad never loads.
 - Otherwise it passes the lookup on to a DNS resolver. By default this is
   **Network DNS**: the resolver of the Wi-Fi or cellular network you're
-  connected to. You can switch to an encrypted DNS provider (DNS over HTTPS)
-  or a plain DNS server in Settings.
+  connected to. In Settings you can turn on an **alternative DNS** (an
+  encrypted DNS provider using DNS over HTTPS, or a plain DNS server).
+
+The alternative is used while it works. If it can't be reached (captive
+Wi-Fi, a network that blocks DNS over HTTPS, a resolver outage), lookups fall
+back to Network DNS, which is unencrypted, so the phone keeps working. The
+alternative is retried in the background until it answers again. In Settings
+you can choose **Don't fall back** instead, so lookups fail rather than leave
+unencrypted. Names that only your local network or carrier can answer (router
+pages, Wi-Fi calling) always use Network DNS. `.local` names are answered
+"not found" inside the tunnel and resolve over multicast DNS outside it.
 
 All other traffic goes straight to the internet as normal, so the VPN doesn't
 slow down browsing or downloads.
@@ -103,16 +112,17 @@ There's no server, account, analytics, or crash reporting. The app only
 connects to:
 
 - the DNS resolver, for lookups that aren't blocked. By default that is the
-  resolver of your current network; if you picked a provider in Settings, it's
-  that provider
+  resolver of your current network; if you turned on an alternative in
+  Settings, it's that provider, and your network's resolver again whenever
+  the alternative is unreachable and fallback is on
 - the blocklist websites, when it updates lists
 
 The log of lookups stays on the phone. It's a fixed-size file of about 4 MB
 that overwrites itself, and you can turn it off in Settings. With the
 default Network DNS, lookups that aren't blocked are visible to your network's
 resolver (for example your home router or mobile carrier), the same as without
-the app. If you choose an encrypted DNS provider, that provider sees them
-instead.
+the app. If you use an encrypted DNS provider, that provider sees them instead
+while it works.
 
 ## Project layout
 
@@ -120,7 +130,8 @@ instead.
 ios/
   project.yml         XcodeGen spec: team, bundle IDs, build settings
   IBlockerKit/        Swift package with the logic, covered by unit tests
-    Sources/IBlockerKit/        DNS parsing, packets, blocklists, query log
+    Sources/IBlockerKit/        DNS parsing, packets, blocklists, query log,
+                                resolver router and circuit breaker
     Sources/IBlockerTunnelKit/  Sends lookups on to the DNS resolver
     Sources/IBlockerUI/         The app's screens (SwiftUI)
   App/                The app target

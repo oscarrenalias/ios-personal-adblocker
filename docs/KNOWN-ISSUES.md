@@ -13,7 +13,7 @@ worth knowing.
 
 ## Suggested order
 
-1. [ ] [KI-1](#ki-1-no-fallback-when-the-dns-resolver-is-unreachable) Resolver fallback and captive Wi-Fi
+1. [x] [KI-1](#ki-1-no-fallback-when-the-dns-resolver-is-unreachable) Resolver fallback and captive Wi-Fi
 2. [ ] [KI-2](#ki-2-lookups-with-large-answers-fail) Large DNS answers
 3. [ ] [KI-3](#ki-3-apple-relay-handling-is-switched-off-docs-say-otherwise) Apple relay: test on device, then fix code or docs
 4. [ ] [KI-4](#ki-4-tunnel-wakes-up-every-2-seconds) Battery: 2-second wake-ups
@@ -27,12 +27,13 @@ worth knowing.
 
 ### KI-1: No fallback when the DNS resolver is unreachable
 
-- **Status:** specs written, in two parts:
+- **Status:** fixed, in two parts:
   1. [`spec-4cb10c45`](../specs/done/network-dns-as-the-default-resolver.md):
-     network DNS as the default. **Done and verified on device on 2026-10-25.**
+     network DNS as the default. Done and verified on device on 2026-10-25.
   2. [`spec-c7e3c45d`](../specs/planned/alternative-resolver-with-failover-to-network-dns.md):
-     alternative resolver with failover. Plan it only after part 1 is
-     verified on device.
+     alternative resolver with failover (`ResolverRouter`, circuit breaker,
+     fallback policy). Implemented; the manual device checks below are still
+     to do.
 - **Severity note:** real but rare in practice. Lockdown has the same
   weakness (one Cloudflare DoH server, no fallback) and works fine day to day.
   It's kept first because the fix also adds network DNS as the default.
@@ -51,8 +52,26 @@ This happens on:
 The VPN has an always-on "connect on demand" rule, so it reconnects into the
 same broken state. The only way out is turning protection off in the app.
 
-**Fix ideas:** fall back to a second resolver, then to the network's own DNS.
-Detect captive portals and let lookups through until the portal is passed.
+**Fix:** the alternative resolver is optional and off by default. When it
+fails 3 times in a row, lookups fall back to network DNS (or fail, if the user
+chose "Don't fall back"), and the alternative is probed with backoff until it
+recovers. See [ARCHITECTURE.md](ARCHITECTURE.md#resolver-router-and-failover).
+No captive-portal detection is needed: network DNS answers on the portal.
+
+**Manual device checks** (spec-c7e3c45d, items 19-22; use a pymobiledevice3
+log stream, see [LOGGING.md](LOGGING.md)):
+
+- [ ] 19. Alternative set to Cloudflare: the `router` category shows lookups
+  going to the alternative.
+- [ ] 20. Custom DoH URL `https://192.0.2.1/dns-query` with fallback on:
+  browsing keeps working, and the log shows a trip "falling back to network
+  DNS (unencrypted)" and periodic probes.
+- [ ] 21. Same URL with "Don't fall back": sites stop loading, and the log
+  shows "lookups failing (fallback off)". Turning fallback back on restores
+  browsing.
+- [ ] 22. `raspberrypi.local` still resolves. On a network change the `local`
+  `SOA` lookups are answered at once, with no 3 s timeouts in the
+  `network-dns` category.
 
 ### KI-2: Lookups with large answers fail
 
@@ -198,7 +217,9 @@ nothing coordinating them. Unlikely to cause problems, but not safe.
 
 ### KI-15: `.local` lookups through Network DNS time out after 3 s
 
-- **Status:** open. Found on device on 2026-10-25 (pymobiledevice3 capture).
+- **Status:** fixed by [`spec-c7e3c45d`](../specs/planned/alternative-resolver-with-failover-to-network-dns.md);
+  device check 22 (see KI-1) is still to do. Found on device on 2026-10-25
+  (pymobiledevice3 capture).
 - **Where:** `ios/IBlockerKit/Sources/IBlockerTunnelKit/NetworkDNSUpstream.swift`
 
 On network changes, iOS sends a unicast `SOA` query for `local` through the
@@ -208,12 +229,10 @@ out after 3 s and the client gets SERVFAIL. Each one holds an in-flight slot
 for 3 s. Browsing isn't affected, and real `.local` names resolve over mDNS
 outside the tunnel.
 
-**Fix ideas:** answer `local` and `*.local` immediately with NXDOMAIN instead
-of forwarding them. One caveat: corporate networks that use `.local` in
-unicast DNS (Active Directory) wouldn't resolve those names through the tunnel
-either way. Decide before changing. Spec B
-(`alternative-resolver-with-failover-to-network-dns`) currently lists `local`
-as a network-only name, which would keep the timeout.
+**Fix:** `ResolverRouter` answers `local` and `*.local` immediately with
+NXDOMAIN and never forwards them. Real `.local` names still resolve over mDNS
+outside the tunnel. Corporate networks that serve `.local` over unicast DNS
+(Active Directory) don't resolve those names through the tunnel.
 
 ### KI-16: After a reboot the tunnel ran with 17 rules and default settings
 
