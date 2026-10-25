@@ -14,7 +14,7 @@ worth knowing.
 ## Suggested order
 
 1. [x] [KI-1](#ki-1-no-fallback-when-the-dns-resolver-is-unreachable) Resolver fallback and captive Wi-Fi
-2. [ ] [KI-2](#ki-2-lookups-with-large-answers-fail) Large DNS answers
+2. [x] [KI-2](#ki-2-lookups-with-large-answers-fail) Large DNS answers
 3. [ ] [KI-3](#ki-3-apple-relay-handling-is-switched-off-docs-say-otherwise) Apple relay: test on device, then fix code or docs
 4. [ ] [KI-4](#ki-4-tunnel-wakes-up-every-2-seconds) Battery: 2-second wake-ups
 5. [ ] [KI-5](#ki-5-background-list-refresh-probably-never-runs) Background refresh
@@ -75,7 +75,9 @@ log stream, see [LOGGING.md](LOGGING.md)):
 
 ### KI-2: Lookups with large answers fail
 
-- **Status:** open
+- **Status:** fixed: answers larger than the MTU are sent as IP fragments
+  (`UDPReplyBuilder.replyPackets`); TC is only used above the max UDP
+  datagram size. Not yet verified on device.
 - **Where:** `DNSProxyEngine.forward`, `DNSResponseBuilder.truncated`,
   `TunnelConstants.mtu`
 

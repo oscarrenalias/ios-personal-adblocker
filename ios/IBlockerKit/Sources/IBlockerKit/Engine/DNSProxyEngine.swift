@@ -1,7 +1,7 @@
 import Foundation
 
-/// The tunnel's brain: raw IP packet in → verdict → raw IP packet out (or
-/// nil to drop). Pure logic over injected collaborators, so the whole path
+/// The tunnel's brain: raw IP packet in → verdict → raw IP packet(s) out (or
+/// none to drop; large answers come back as IP fragments). Pure logic over injected collaborators, so the whole path
 /// is unit-testable off-device.
 ///
 /// Concurrency: an actor, but reentrant — `handlePacket` suspends while an
@@ -53,9 +53,9 @@ public actor DNSProxyEngine {
 
     // MARK: - Packet path
 
-    public func handlePacket(_ packet: Data) async -> Data? {
+    public func handlePacket(_ packet: Data) async -> [Data] {
         guard let udp = PacketParser.parseUDP(packet), udp.destinationPort == 53 else {
-            return nil
+            return []
         }
         let message = Data(udp.payload)
 
@@ -71,22 +71,22 @@ public actor DNSProxyEngine {
             Self.log.debug("query \(query.questionName) qtype \(query.qtype): blocked")
             record(name: query.questionName, qtype: query.qtype, verdict: .blocked)
             let response = DNSResponseBuilder.blocked(for: query, ttl: configuration.blockTTL)
-            return UDPReplyBuilder.reply(to: udp, payload: [UInt8](response))
+            return packets(for: udp, payload: [UInt8](response))
         }
 
         return await forward(raw: query.raw, query: query, udp: udp)
     }
 
-    private func forward(raw: Data, query: DNSQuery?, udp: ParsedUDPPacket) async -> Data? {
+    private func forward(raw: Data, query: DNSQuery?, udp: ParsedUDPPacket) async -> [Data] {
         guard inFlight < configuration.maxInFlight else {
             if let query {
                 Self.log.debug("query \(query.questionName) qtype \(query.qtype): failed (in-flight limit \(configuration.maxInFlight) reached)")
                 record(name: query.questionName, qtype: query.qtype, verdict: .failed)
                 let servfail = DNSResponseBuilder.servfail(for: query)
-                return UDPReplyBuilder.reply(to: udp, payload: [UInt8](servfail))
+                return packets(for: udp, payload: [UInt8](servfail))
             }
             Self.log.debug("unparseable query dropped (in-flight limit \(configuration.maxInFlight) reached)")
-            return nil
+            return []
         }
 
         inFlight += 1
@@ -100,28 +100,35 @@ public actor DNSProxyEngine {
                 Self.log.debug("query \(query.questionName) qtype \(query.qtype): allowed in \(elapsedMs) ms")
                 record(name: query.questionName, qtype: query.qtype, verdict: .allowed)
             }
-            let ipOverhead = udp.ipVersion == 4 ? 28 : 48
-            if answer.count + ipOverhead > configuration.mtu {
+            if answer.count > UDPReplyBuilder.maxPayload(ipVersion: udp.ipVersion) {
                 if let query {
-                    Self.log.debug("query \(query.questionName): answer \(answer.count) bytes exceeds MTU, truncated")
+                    Self.log.debug("query \(query.questionName): answer \(answer.count) bytes exceeds max UDP datagram, truncated (TC)")
                     let truncated = DNSResponseBuilder.truncated(for: query)
-                    return UDPReplyBuilder.reply(to: udp, payload: [UInt8](truncated))
+                    return packets(for: udp, payload: [UInt8](truncated))
                 }
-                Self.log.debug("answer \(answer.count) bytes exceeds MTU, dropped")
-                return nil
+                Self.log.debug("answer \(answer.count) bytes exceeds max UDP datagram, dropped")
+                return []
             }
-            return UDPReplyBuilder.reply(to: udp, payload: [UInt8](answer))
+            let result = packets(for: udp, payload: [UInt8](answer))
+            if result.count > 1 {
+                Self.log.debug("query \(query?.questionName ?? "?"): fragmented reply, answer \(answer.count) bytes, \(result.count) fragments")
+            }
+            return result
         } catch {
             let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
             if let query {
                 Self.log.debug("query \(query.questionName) qtype \(query.qtype): failed in \(elapsedMs) ms, returning SERVFAIL: \(error)")
                 record(name: query.questionName, qtype: query.qtype, verdict: .failed)
                 let servfail = DNSResponseBuilder.servfail(for: query)
-                return UDPReplyBuilder.reply(to: udp, payload: [UInt8](servfail))
+                return packets(for: udp, payload: [UInt8](servfail))
             }
             Self.log.debug("unparseable query dropped after upstream error in \(elapsedMs) ms: \(error)")
-            return nil
+            return []
         }
+    }
+
+    private func packets(for udp: ParsedUDPPacket, payload: [UInt8]) -> [Data] {
+        UDPReplyBuilder.replyPackets(to: udp, payload: payload, mtu: configuration.mtu)
     }
 
     private func record(name: String, qtype: UInt16, verdict: LogVerdict) {
