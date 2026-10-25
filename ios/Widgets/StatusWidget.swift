@@ -61,7 +61,7 @@ struct StatusWidgetView: View {
             Text("\(entry.blockedToday) blocked")
         case .accessoryRectangular:
             VStack(alignment: .leading) {
-                Label("AdBlocker", systemImage: statusSymbol)
+                Label("Personal AdBlocker", systemImage: statusSymbol)
                     .font(.headline)
                 Text("\(entry.blockedToday.formatted()) blocked today")
                     .font(.caption)
@@ -119,7 +119,7 @@ struct StatusWidget: Widget {
             StatusWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("AdBlocker")
+        .configurationDisplayName("Personal AdBlocker")
         .description("Ads blocked today and protection status.")
         .supportedFamilies([
             .systemSmall, .systemMedium,

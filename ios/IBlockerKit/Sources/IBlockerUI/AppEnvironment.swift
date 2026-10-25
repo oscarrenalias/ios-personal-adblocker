@@ -6,7 +6,7 @@ import IBlockerKit
 /// file hardcodes the App Group or bundle identifiers.
 public enum AppEnvironment {
     public static var groupID: String {
-        AppGroupPaths.groupID(from: .main) ?? "group.invalid.iblocker"
+        AppGroupPaths.groupID(from: .main) ?? "group.invalid.adblocker"
     }
 
     public static var paths: AppGroupPaths {

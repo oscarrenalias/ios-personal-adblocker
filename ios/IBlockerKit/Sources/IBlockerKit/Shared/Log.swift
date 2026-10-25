@@ -14,7 +14,7 @@ import os
 /// that level is not being collected, so per-query debug calls cost only the
 /// check.
 public struct Log: Sendable {
-    public static let subsystem = "com.iblocker"
+    public static let subsystem = "net.renalias.adblocker"
 
     /// Process-wide "verbose logging" switch (Settings ▸ Verbose logging).
     /// iOS keeps `debug` out of third-party subsystems by default and a
