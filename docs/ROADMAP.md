@@ -12,7 +12,7 @@ Written 2026-10-25.
 | # | Feature | Depends on | Size |
 |---|---|---|---|
 | 0 | Finish reboot robustness (defects `B-0d1e113d`, `B-28826355`) | — | in progress |
-| 1 | [Configurable failure policy](#configurable-failure-policy): encryption part folded into `spec-c7e3c45d` | KI-1 part 1 (done) | M |
+| 1 | [Configurable failure policy](#configurable-failure-policy): behaviour in `spec-c7e3c45d`, status line in `spec-d10b070a` | KI-1 part 1 (done) | M |
 | 2 | [Reliable blocklist updates](#reliable-blocklist-updates) | — (can run alongside 1) | M |
 | 3 | [DNS caching](#dns-caching) | 1 (sits in front of the router) | M |
 | 4 | [Explain each decision](#explain-each-decision) + [Rule testing](#rule-testing) | 3 (to report "from cache") | L |

@@ -1,7 +1,7 @@
 ---
 name: Alternative resolver with failover to network DNS
 id: spec-c7e3c45d
-description: "Optional alternative resolver with circuit-breaker failover to network DNS and network-only names; KI-1 part 2, depends on spec-4cb10c45 verified on device"
+description: "Tunnel side of KI-1 part 2: ResolverRouter with circuit breaker, fallback policy (network DNS or none), network-only names, .local NXDOMAIN, presets/settings/migration/IPC, minimal Settings controls"
 dependencies: null
 priority: high
 complexity: null
@@ -21,57 +21,60 @@ feature_root_id: null
 
 Let the user turn on an alternative resolver (Cloudflare, Quad9 and so on).
 It's used while it's reachable. When it isn't, lookups fall back to network
-DNS by default, and the alternative is retried until it works again. The user
-can choose to never fall back, so lookups fail instead of going unencrypted.
-The app always makes it clear and obvious when lookups are going out
-unencrypted.
+DNS by default, or fail if the user has turned fallback off. The alternative
+is retried until it works again. The tunnel reports which resolver is
+answering and whether lookups are encrypted.
 
-This is part 2 of 2 for `docs/KNOWN-ISSUES.md` KI-1.
+This is the tunnel and settings side. The Dashboard status line that shows
+encryption state is a separate spec, "Encryption status in the Dashboard
+status line", which depends on this one.
 
-**Depends on:** "Network DNS as the default resolver" (`spec-4cb10c45`) being
-merged **and verified on device** (its criteria 9–12). Don't plan this spec
-before then.
+This fixes `docs/KNOWN-ISSUES.md` KI-1 (part 2 of 2) and KI-15.
+
+**Depends on:** `spec-4cb10c45` (network DNS default), merged and verified on
+device.
 
 ## Problems to Fix
 
-- After part 1, the user picks exactly one upstream. If that upstream is a
-  DoH or UDP resolver and it can't be reached, `DNSProxyEngine.forward`
+- The tunnel forwards to exactly one upstream. If that upstream is a DoH or
+  UDP resolver and it can't be reached, `DNSProxyEngine.forward`
   (`ios/IBlockerKit/Sources/IBlockerKit/Engine/DNSProxyEngine.swift`) returns
   SERVFAIL for every lookup, and the phone has no working DNS (captive-portal
   Wi-Fi, networks blocking 1.1.1.1 or DoH, resolver outages).
 - Names that only the local network or carrier can answer (router pages,
   Wi-Fi calling servers) are sent to the public resolver too.
-- The app never says whether lookups are encrypted. Network DNS and the UDP
-  choices send lookups in plain text, but the Settings label is the only
-  hint.
 - iOS sends `SOA` lookups for `local` through the tunnel on every network
-  change. They time out after 3 s via network DNS (`docs/KNOWN-ISSUES.md`
-  KI-15).
+  change. They time out after 3 s via network DNS (KI-15).
+- The tunnel doesn't report whether lookups are going out encrypted.
 
 ## Background and decisions
 
-- **Retrying differs from AdGuard on purpose.** AdGuard tries its primary on
-  every query and falls back per query, so every lookup pays a timeout while
-  the primary is down. This spec uses a circuit breaker so lookups skip a dead
-  alternative.
-- **Architecture:** `DNSProxyEngine` keeps holding **one** `DNSUpstream`. A
-  new `ResolverRouter` (in `ios/IBlockerKit/Sources/IBlockerKit/Engine/`)
-  implements `DNSUpstream` and wraps the network upstream and the optional
-  alternative upstream. It owns the circuit breaker and the network-only name
-  rules. It parses messages with `DNSParser` itself when it needs the name.
-  `DNSProxyEngine` itself isn't changed, so blocking stays first and
-  unchanged.
-- **Battery:** no timers. Probes are triggered lazily by incoming queries and
-  by network-change events (see `docs/KNOWN-ISSUES.md` KI-4).
+- **Circuit breaker, not per-query fallback.** AdGuard tries its primary on
+  every query, so each lookup pays a timeout while the primary is down. Here,
+  lookups skip a dead alternative, and it's re-probed lazily.
+- **Architecture:** `DNSProxyEngine` keeps holding one `DNSUpstream` and
+  **isn't changed**. A new `ResolverRouter` (in
+  `ios/IBlockerKit/Sources/IBlockerKit/Engine/`) implements `DNSUpstream`. It
+  wraps the network upstream and the optional alternative, and owns the
+  breaker, the fallback policy, the network-only names and `.local`. It
+  parses messages with `DNSParser` when it needs the name. Blocking stays in
+  the engine, before the router.
+- **Status reporting:** `PacketTunnelProvider` keeps a reference to the
+  current router. In `handleAppMessage(.getStats)`
+  (`ios/PacketTunnel/PacketTunnelProvider.swift`, around line 217) it takes
+  `engine.statsSnapshot(...)` and sets `resolverStatus = router.status`
+  before replying. The engine isn't involved.
 - **Encrypted or not:** only DoH (`UpstreamConfig.Kind.doh`) is encrypted.
-  Network DNS (`.network`) and UDP (`.udp`) are unencrypted. Derive this from
-  the kind in one place (for example `UpstreamConfig.isEncrypted`), and
-  don't duplicate it.
-- **`.local`:** answered locally with NXDOMAIN, never forwarded. iOS
-  resolves `.local` device names (for example `raspberrypi.local`) over
-  multicast DNS outside the tunnel, so this doesn't affect them. NXDOMAIN for
-  the `local` `SOA` check keeps iOS using multicast DNS. Decided with the
-  user on 2026-10-25.
+  `.network` and `.udp` are unencrypted. Expose this once, as
+  `UpstreamConfig.isEncrypted`.
+- **`.local`** is answered locally with NXDOMAIN, never forwarded. `.local`
+  device names (for example `raspberrypi.local`) resolve over multicast DNS
+  outside the tunnel, and NXDOMAIN for the `local` `SOA` check keeps iOS
+  doing that. Decided with the user on 2026-10-25.
+- **Battery:** no timers. Probes are triggered by queries and by network
+  changes (KI-4).
+- **Changing settings rebuilds the router,** so breaker state is reset on
+  purpose.
 - **Profiles** are out of scope (decided 2026-10-25).
 
 ## Changes
@@ -79,32 +82,38 @@ before then.
 ### 1. Circuit breaker (pure logic)
 
 A `CircuitBreaker` value type with an injected clock (`() -> Date`), in
-`ios/IBlockerKit/Sources/IBlockerKit/Engine/`. These rules are fixed:
+`ios/IBlockerKit/Sources/IBlockerKit/Engine/`.
 
 - **States:** `healthy(consecutiveFailures)` and `down(nextProbeAt, backoff)`.
-- **Healthy:** a success resets the failure count to 0. A failure adds 1. At
-  **3** it goes to `down` with backoff **30 s** and
-  `nextProbeAt = now + 30 s`.
-- **Down:** real queries never go to the alternative. When a query arrives
-  and `now >= nextProbeAt`, one background probe is allowed. On probe
-  success → `healthy(0)`. On probe failure, the backoff doubles (30, 60, 120,
-  240 s, then capped at **300 s**) and `nextProbeAt = now + backoff`. Only
-  one probe runs at a time.
-- **Recovery:** after going back to healthy, the next trip starts again at
+  A `generation: Int` increments on every trip and every reset.
+- **Healthy:** a success sets the failure count to 0. A failure adds 1. At
+  **3** it trips: `down`, `backoff = 30 s`, `nextProbeAt = tripTime + 30 s`,
+  and the generation increments.
+- **Down:** real queries never go to the alternative. When a query that would
+  have gone to the alternative (router rules 4–5) arrives with
+  `now >= nextProbeAt`, and no probe is running, one background probe starts.
+  - Probe success → `healthy(0)`, generation increments.
+  - Probe failure at time `t` → `backoff = min(backoff × 2, 300 s)`,
+    `nextProbeAt = t + backoff`. After the trip the waits are 30 s, then
+    60 s, 120 s, 240 s, 300 s, 300 s and so on, each measured from the
+    previous probe's failure.
+- **Recovery:** after returning to healthy, the next trip starts again at
   30 s.
-- **Late results:** results from queries sent before the breaker went down
-  don't change its state while it's down.
-- **Network change:** go to `healthy(0)` and request an immediate probe. A
-  failed probe counts as one failure, so it doesn't trip the breaker on its
-  own.
+- **Stale results:** every alternative query and probe records the
+  generation it started in. Results from an older generation are ignored.
+  This covers queries in flight during a trip, a reset or a network change.
+- **Network change** (item 5): go to `healthy(0)`, increment the generation,
+  and request one immediate probe. Any probe already running is ignored when
+  it finishes, because its generation is old. The new probe's failure counts
+  as one failure, so it doesn't trip the breaker on its own. If the
+  alternative is off, a network change does nothing.
 
 ### 2. Network-only names (pure logic)
 
 A fixed list in `IBlockerKit`. A name matches if it equals an entry or is a
-subdomain of one. Entries with `*` match exactly one label in that position.
-These names always go to network DNS, whatever the breaker state. They are
-still checked against the blocklist first, because the engine does that
-before calling the upstream.
+subdomain of one. `*` matches exactly one label. These names always go to
+`network`, under both fallback policies, and don't trigger probes. The engine
+has already checked them against the blocklist.
 
 ```
 lan
@@ -155,294 +164,265 @@ tplinkextender.net
 www.asusrouter.com
 ```
 
-(Wi-Fi calling and router entries are a snapshot of the DnsLibs default
+(The Wi-Fi calling and router entries are a snapshot of the DnsLibs default
 `fallback_domains` list, AdguardTeam/DnsLibs `proxy/dnsproxy.cpp` at
 `57f11ac436`, 2026-07-20. That's a list of domain names, not code.
-`pub.3gppnetwork.org` covers the standard 3GPP ePDG names.)
-
-**`local` is not on this list.** It's handled by the router itself (item 3).
+`local` is handled by router rule 1, not here.)
 
 ### 3. ResolverRouter
 
-Implements `DNSUpstream`, wrapping `network: DNSUpstream`,
-`alternative: DNSUpstream?`, a `CircuitBreaker` and a `FallbackPolicy`
-(`.networkDNS` or `.none`, item 4). The engine has already checked the
-blocklist before the router is called.
+Implements `DNSUpstream`. It wraps `network: DNSUpstream`,
+`alternative: (upstream: DNSUpstream, name: String, encrypted: Bool)?`,
+`policy: FallbackPolicy` (`.networkDNS` | `.none`) and a `CircuitBreaker`.
+Rules, in order:
 
-Rules, in this order:
-
-1. **`local` and `*.local`:** answered by the router itself with NXDOMAIN,
-   for any query type (build the reply with `DNSResponseBuilder.nxdomain`).
-   No upstream is called. This applies whether the alternative is on or off.
-2. **Alternative off (nil):** everything goes to `network`.
-3. **Network-only name** (item 2): goes to `network`, under both fallback
-   policies. These names can only be answered by the local network or the
-   carrier.
-4. **Alternative on and healthy:** try `alternative` with a **2 s** timeout
-   that the router enforces itself (don't change the `DoHUpstream` or
-   `UDPUpstream` defaults). On success, record the success and return the
-   answer. On failure or timeout, record the failure, then:
-   - policy `.networkDNS`: immediately re-send the same query to `network`
-     and return its result.
-   - policy `.none`: throw, so the engine answers SERVFAIL. Never call
-     `network`.
-5. **Alternative on and down:**
-   - policy `.networkDNS`: go to `network`.
-   - policy `.none`: throw immediately (SERVFAIL) without calling either
-     upstream.
-
-   In both cases, if a probe is due, start one in the background.
+1. **`local` / `*.local`** (any type): reply NXDOMAIN using
+   `DNSResponseBuilder.nxdomain(for:)`. No upstream, no probe. This applies
+   whether the alternative is on or off. Messages that can't be parsed can't
+   be checked for `.local`, so they skip this rule.
+2. **Alternative off:** everything goes to `network`.
+3. **Network-only name:** goes to `network`.
+4. **Alternative on and healthy:** query `alternative` with a **2 s** timeout
+   that the router enforces itself (`DoHUpstream`/`UDPUpstream` defaults are
+   unchanged). On success, record a success. On failure or timeout, record a
+   failure, then:
+   - `.networkDNS`: re-send the same query to `network` and return its
+     result.
+   - `.none`: throw, so the engine answers SERVFAIL.
+5. **Alternative on and down:** if a probe is due, start one in the
+   background. Then:
+   - `.networkDNS`: go to `network`.
+   - `.none`: throw.
+6. **Unparseable messages:** if the alternative is on and healthy, rule 4
+   applies. Otherwise:
+   - `.networkDNS`: send them to `network` (which throws, so they're dropped,
+     as today).
+   - `.none`: drop them.
 - **Probe:** an `A` query for `apple.com` (class IN, RD set) sent to the
-  alternative with a 2 s timeout. Any valid response with RCODE NOERROR
-  counts as success.
-- **Unparseable messages:** send to `alternative` if it's on and healthy.
-  Otherwise, with policy `.networkDNS` send them to `network` (which throws,
-  so they're dropped, as today), and with policy `.none` drop them.
-- **No physical interface:** if the alternative is on and healthy, it's still
-  tried. Otherwise the network upstream throws, which gives SERVFAIL.
-- `networkChanged()` resets the breaker (item 1). `status` reports the
-  current state (item 6).
+  alternative with a 2 s timeout. A valid response with RCODE NOERROR counts
+  as success.
+- **No physical interface:** DoH and UDP upstreams aren't bound to an
+  interface, so a healthy alternative is still tried. `network` throws, as
+  today.
+- `networkChanged()` → breaker network change (item 1).
+- `status: ResolverStatus`:
+  - alternative off → `network`
+  - healthy → `alternative(name:encrypted:)`
+  - down with `.networkDNS` → `fallingBack(name:)`
+  - down with `.none` → `failing(name:)`
 
-### 4. Settings, migration and IPC
+### 4. Presets, settings, migration and IPC
 
-- New `ResolverSettings`: `useAlternative: Bool`,
+- **Presets move into `IBlockerKit`:** move the choices from the private
+  `SettingsView.upstreamChoices` into `IBlockerKit` as
+  `UpstreamPreset { name, label, config }` (for example
+  `ios/IBlockerKit/Sources/IBlockerKit/Shared/UpstreamPreset.swift`). `name`
+  is short and unique, and `label` is what the picker shows:
+
+  | name | label | config |
+  |---|---|---|
+  | Cloudflare | Cloudflare (DoH) | DoH `https://1.1.1.1/dns-query` |
+  | AdGuard DNS | AdGuard DNS (DoH, extra blocking) | DoH `https://94.140.14.14/dns-query` |
+  | Quad9 | Quad9 (DoH, malware blocking) | DoH `https://9.9.9.9:5053/dns-query` |
+  | Cloudflare (UDP) | Cloudflare (UDP 53, unencrypted) | UDP `1.1.1.1` |
+  | Quad9 (UDP) | Quad9 (UDP 53, unencrypted) | UDP `9.9.9.9` |
+
+  A config that matches no preset is named `"Custom"`. "Network DNS" isn't
+  an alternative preset.
+- **`ResolverSettings`** (Codable): `useAlternative: Bool`,
   `alternative: UpstreamConfig`, `alternativeName: String`,
-  `fallbackPolicy: FallbackPolicy` (`.networkDNS` | `.none`). Stored in
-  `SharedSettings`
-  (`ios/IBlockerKit/Sources/IBlockerKit/Shared/SharedSettings.swift`).
-  Default: `useAlternative = false`, alternative = Cloudflare DoH, name
-  `"Cloudflare"`, `fallbackPolicy = .networkDNS`.
-- **Migration from part 1's single `upstreamConfig`:**
-  - If the stored config is `.network`, or nothing is stored: use the
-    defaults above.
-  - If the stored config is DoH or UDP: `useAlternative = true`, with that
-    config as the alternative. The name is the matching preset's name, or
-    `"Custom"`. The user's encrypted choice is kept, never silently
-    downgraded.
-- IPC: replace `TunnelRequest.setUpstream` with
+  `fallbackPolicy: FallbackPolicy`. Stored as JSON under the shared-defaults
+  key `resolverSettings` (`SharedSettings`,
+  `ios/IBlockerKit/Sources/IBlockerKit/Shared/SharedSettings.swift`). Default:
+  off, Cloudflare (DoH), `"Cloudflare"`, `.networkDNS`.
+- **Migration is computed on read and doesn't write.** If
+  `resolverSettings` is missing, derive the settings from the old
+  `upstreamConfig`. Leave `upstreamConfig` untouched. The app writes
+  `resolverSettings` only when the user changes a setting, so the app and the
+  tunnel derive the same result and don't race.
+  - `upstreamConfig` missing or `.network` → the defaults above.
+  - DoH or UDP → `useAlternative = true`, that config, the matching preset
+    name (or `"Custom"`), `.networkDNS`. An encrypted choice is never
+    silently downgraded.
+- **IPC:** replace `TunnelRequest.setUpstream(UpstreamConfig)` with
   `setResolverSettings(ResolverSettings)`
-  (`ios/IBlockerKit/Sources/IBlockerKit/Shared/TunnelIPC.swift`). Apply it to
-  a running tunnel without restarting.
+  (`ios/IBlockerKit/Sources/IBlockerKit/Shared/TunnelIPC.swift`). Replace
+  `TunnelController.setUpstream`
+  (`ios/IBlockerKit/Sources/IBlockerUI/System/TunnelController.swift`) with
+  `setResolverSettings`. No dead IPC cases are left. `TunnelRuntimeStats`
+  gains `resolverStatus: ResolverStatus?`, which is nil for older tunnels.
 
 ### 5. Tunnel wiring
 
-`ios/PacketTunnel/PacketTunnelProvider.swift`:
-- Build a `ResolverRouter` from `ResolverSettings`: the network upstream from
-  part 1, plus `UpstreamFactory.make(alternative)` when `useAlternative` is
-  on.
-- Call `networkChanged()` on every `NWPathMonitor` path change (part 1
-  already has the monitor).
-- **Boot recovery:** the provider already re-applies the upstream once
-  settings become readable after the first unlock (`TunnelRecovery`,
-  `docs/KNOWN-ISSUES.md` KI-16). That path must now rebuild the router from
-  `ResolverSettings`, not from the old single `upstreamConfig`.
+In `ios/PacketTunnel/PacketTunnelProvider.swift`:
 
-### 6. Status
+- Build a `ResolverRouter` from `ResolverSettings`: `network` from the
+  existing `makeUpstream(UpstreamConfig(kind: .network))`, and the
+  alternative from `makeUpstream(settings.alternative)` when
+  `useAlternative` is on. Keep a reference to it, set it as the engine's
+  upstream, and rebuild it on `setResolverSettings`.
+- `.getStats` sets `resolverStatus` from the router (see Background).
+- **Network change:** call `router.networkChanged()` only when the
+  **selected physical interface changes**. That's the same condition as the
+  existing `path` log line, not every path update.
+- **Boot recovery** (`TunnelRecovery`, KI-16): while settings are unreadable,
+  the router is built with defaults (alternative off). When settings become
+  readable, rebuild it from `ResolverSettings`.
 
-- `TunnelRuntimeStats` gains `resolverStatus: ResolverStatus`, with cases:
-  - `network`
-  - `alternative(name: String, encrypted: Bool)`
-  - `fallingBack(name: String)`: alternative down, policy `.networkDNS`
-  - `failing(name: String)`: alternative down, policy `.none`
+### 6. Minimal Settings controls
 
-  `ResolverStatus.isEncrypted` is false for `network` and `fallingBack`.
-  For `alternative` it follows the config's kind (DoH yes, UDP no).
-- Exact UI strings for the status line:
-  - `network` → **"Network DNS"**
-  - `alternative(name, _)` → **"<name>"**, e.g. "Cloudflare"
-  - `fallingBack(name)` → **"Network DNS — <name> unreachable, retrying"**
-  - `failing(name)` → **"<name> unreachable — lookups are failing (fallback is off)"**
-- Shown on the Dashboard
-  (`ios/IBlockerKit/Sources/IBlockerUI/Dashboard/DashboardView.swift`) and
-  in the DNS section of Settings.
-- Map the status to strings, icons and colours in one place (for example a
-  `ResolverStatusPresentation` in `IBlockerKit`) that both screens use and
-  that tests cover. Same pattern as the existing `RulesTilePresentation`.
-
-### 7. Encryption visibility
-
-The user must be able to tell at a glance whether lookups are currently going
-out unencrypted.
-
-- **Dashboard: DNS encryption row**, always visible while protection is on,
-  directly under the protection status:
-  - Encrypted: `lock.fill`, green, **"Encrypted DNS · <name>"**.
-  - Unencrypted by choice (`network`, or a UDP alternative): `lock.open.fill`,
-    orange, **"Unencrypted DNS · <name or Network DNS>"**. Caption: **"Your
-    network or DNS provider can see the sites you look up."**
-- **Dashboard: fallback banner**, shown at the top of the Dashboard, above
-  everything else, whenever the status is `fallingBack` or `failing`:
-  - `fallingBack`: orange background, `exclamationmark.triangle.fill`.
-    Title **"Encrypted DNS unavailable"**. Body **"<name> can't be reached.
-    Lookups are going unencrypted to your network's DNS until it's back."**
-    Button **"DNS settings"** opens the DNS section of Settings.
-  - `failing`: red background. Title **"DNS lookups are failing"**. Body
-    **"<name> can't be reached and fallback is off. Turn on fallback to stay
-    connected (unencrypted)."** Same button.
-- **Settings:** the same status line and icon at the top of the DNS section.
-- When the tunnel's stats aren't reachable, show neither the row nor the
-  banner. Show the existing "Tunnel not reachable" state instead. Never
-  guess.
-
-### 8. Settings UI
-
-In `ios/IBlockerKit/Sources/IBlockerUI/Settings/SettingsView.swift`, replace
-the single upstream picker with:
+Replace the single upstream picker in
+`ios/IBlockerKit/Sources/IBlockerUI/Settings/SettingsView.swift`
+("Upstream DNS (VPN mode)" section) with:
 
 - A toggle **"Use alternative DNS"**.
 - When it's on:
-  - A picker with the existing DoH and UDP choices (without "Network DNS"),
-    plus the existing custom DoH and UDP fields. Custom entries get the name
-    "Custom". Label UDP choices **"(unencrypted)"**, for example
-    "Cloudflare (UDP 53, unencrypted)".
-  - A picker **"If the alternative is unreachable"** with:
-    - **"Use network DNS (unencrypted)"** → `.networkDNS`
-    - **"Don't fall back (lookups fail)"** → `.none`
-- A footer explaining that network DNS is used when the toggle is off, when
-  the alternative is unreachable (if fallback is on), and always for local
-  and carrier names. `.local` names are handled by your local network,
-  outside the app.
+  - a picker of `UpstreamPreset` labels, plus the existing custom DoH and UDP
+    fields (custom entries are named `"Custom"`)
+  - a picker **"If the alternative is unreachable"**:
+    - **"Use network DNS (unencrypted)"**
+    - **"Don't fall back (lookups fail)"**
+- A footer: "Network DNS is used when this is off, when the alternative is
+  unreachable (if fallback is on), and always for local and carrier names.
+  .local names are handled by your local network."
+- Each change writes `resolverSettings` and sends `setResolverSettings`.
 
-### 9. Docs
+The encryption status display is in the follow-up spec.
 
-- `README.md` and `docs/ARCHITECTURE.md`: describe the failover, the
-  fallback policy and the encryption indicator.
+### 7. Docs
+
+- `README.md` and `docs/ARCHITECTURE.md`: describe the router, the
+  failover, the fallback policy and `.local`.
 - `docs/KNOWN-ISSUES.md`: mark KI-1 and KI-15 as fixed, and link this spec.
-- `docs/ROADMAP.md`: mark "Configurable failure policy" (encryption part) as
-  done.
 
 ## Files to Modify
 
 | File | Change |
 |---|---|
-| `ios/IBlockerKit/Sources/IBlockerKit/Engine/` (new files) | `CircuitBreaker`, network-only names, `ResolverRouter` (items 1–3) |
+| `ios/IBlockerKit/Sources/IBlockerKit/Engine/` (new files) | `CircuitBreaker`, network-only names, `ResolverRouter`, `ResolverStatus` (items 1–3) |
+| `ios/IBlockerKit/Sources/IBlockerKit/Shared/UpstreamPreset.swift` (new) | Presets (item 4) |
 | `ios/IBlockerKit/Sources/IBlockerKit/Shared/SharedSettings.swift` | `ResolverSettings`, `FallbackPolicy`, migration (item 4) |
-| `ios/IBlockerKit/Sources/IBlockerKit/Shared/TunnelIPC.swift` | IPC request, `ResolverStatus` in stats, `UpstreamConfig.isEncrypted` (items 4, 6) |
-| `ios/IBlockerKit/Sources/IBlockerKit/` (new file) | `ResolverStatusPresentation` (item 6) |
-| `ios/PacketTunnel/PacketTunnelProvider.swift` | Build the router, forward path changes, boot recovery (item 5) |
-| `ios/IBlockerKit/Sources/IBlockerUI/Settings/SettingsView.swift` | Toggle, pickers, footer, status (items 6–8) |
-| `ios/IBlockerKit/Sources/IBlockerUI/Dashboard/DashboardView.swift` | Encryption row, fallback banner (item 7) |
-| `ios/IBlockerKit/Sources/IBlockerUI/System/TunnelController.swift` | Send `setResolverSettings` |
-| `ios/IBlockerKit/Tests/IBlockerKitTests/` | Tests for the breaker, names, router, policy, presentation, settings and IPC |
-| `README.md`, `docs/ARCHITECTURE.md`, `docs/KNOWN-ISSUES.md`, `docs/ROADMAP.md` | Docs (item 9) |
+| `ios/IBlockerKit/Sources/IBlockerKit/Shared/TunnelIPC.swift` | IPC, `resolverStatus` in stats, `isEncrypted` (item 4) |
+| `ios/PacketTunnel/PacketTunnelProvider.swift` | Router wiring, stats, network change, recovery (item 5) |
+| `ios/IBlockerKit/Sources/IBlockerUI/System/TunnelController.swift` | `setResolverSettings` (item 4) |
+| `ios/IBlockerKit/Sources/IBlockerUI/Settings/SettingsView.swift` | Minimal controls (item 6) |
+| `ios/IBlockerKit/Tests/IBlockerKitTests/` | Tests |
+| `README.md`, `docs/ARCHITECTURE.md`, `docs/KNOWN-ISSUES.md` | Docs (item 7) |
 
-`DNSProxyEngine.swift` should not need changes.
+`DNSProxyEngine.swift` isn't changed.
 
 ## Logging
 
-Follow [docs/LOGGING.md](../../docs/LOGGING.md): subsystem `com.iblocker`, and
-the Linux-safe wrapper in `IBlockerKit`, which is created here if it doesn't
-exist yet. Categories: `router` (router and breaker), `settings`, `tunnel`.
+Follow [docs/LOGGING.md](../../docs/LOGGING.md) and use the `Log` wrapper.
+Use category `router` for the router and breaker, `settings` for settings,
+and `tunnel` for the provider. Network-change detection stays under `path`.
 
-| Event | Level | Details to include |
-|---|---|---|
-| Breaker trips (healthy → down) | `notice` | alternative name, failure count, backoff, **and the effect: "falling back to network DNS (unencrypted)" or "lookups failing (fallback off)"** |
-| Resolver status changes (any `ResolverStatus` transition) | `notice` | old → new status, encrypted yes/no |
-| `.local` query answered locally | `debug` | domain, qtype |
-| Breaker recovers (down → healthy) | `notice` | alternative name, how long it was down |
-| Probe started / succeeded / failed | `info` | alternative name, duration, error on failure, next probe time |
-| Network change resets the breaker | `info` | old → new interface name |
-| Resolver settings applied (IPC, start or boot recovery) | `notice` | toggle on/off, alternative name and URL, fallback policy |
-| Migration from old `upstreamConfig` | `notice` | old kind → new settings (no domains) |
-| Query failed on alternative, re-sent to network | `debug` | domain, qtype, error, elapsed ms |
-| Routing decision per query | `debug` | domain, qtype, target (alternative / network / network-only name) |
-| Both upstreams failed (SERVFAIL) | `error` | qtype, both errors; domain only in a separate `debug` line |
-| IPC `setResolverSettings` can't be applied or decoded | `error` | reason |
+| Event | Level | Category | Details |
+|---|---|---|---|
+| Breaker trips | `notice` | router | alternative name, failure count, backoff, effect: "falling back to network DNS (unencrypted)" or "lookups failing (fallback off)" |
+| Breaker recovers | `notice` | router | alternative name, time spent down |
+| Probe started / succeeded / failed | `info` | router | name, duration, error, next probe time |
+| Breaker reset by network change | `info` | router | generation |
+| `ResolverStatus` changed | `notice` | router | old → new, encrypted yes/no |
+| Resolver settings applied | `notice` | tunnel | source (start / ipc / recovery), toggle, alternative name and URL, policy |
+| Migration derived from `upstreamConfig` | `notice` | settings | old kind → derived settings (no domains) |
+| Query failed on alternative and was re-sent to network | `debug` | router | domain, qtype, error, elapsed ms |
+| Routing decision | `debug` | router | domain, qtype, rule (local / off / network-only / alternative / fallback / failing) |
+| Query failed with no fallback (SERVFAIL) | `debug` | router | domain, qtype, reason. The state change itself is logged once, by the trip notice. |
+| `setResolverSettings` can't be applied or decoded | `error` | tunnel | reason |
 
 ## Acceptance Criteria
 
 Automated (`swift test --package-path ios/IBlockerKit`, with fake upstreams
 and an injected clock):
 
-1. With the alternative off, the router never calls the alternative.
-2. With the alternative healthy, queries go to the alternative. When the
-   alternative throws or takes longer than 2 s, the same query is answered
-   by `network`, and the client gets that answer, not SERVFAIL.
-3. After 3 consecutive alternative failures, the next query goes to
-   `network` without calling the alternative.
-4. While down, probes run only on the first query at or after 30 s, 60 s,
-   120 s, 240 s, 300 s and then every 300 s. Only one probe runs at a time.
-   No probes run without incoming queries.
-5. A successful probe makes queries go to the alternative again. The next
-   trip starts with a 30 s backoff.
-6. A network-change event resets to `healthy(0)` and triggers one probe. A
-   single failed probe does not trip the breaker.
-7. A failure from a query sent before the trip doesn't change the state
-   while the breaker is down.
+1. With the alternative off, the alternative is never called.
+2. With the alternative healthy, queries go to the alternative. When it
+   throws or takes more than 2 s, with policy `.networkDNS`, the same query
+   is answered by `network`, and the client gets that answer, not SERVFAIL.
+3. After 3 consecutive failures, the next query goes to `network` without
+   calling the alternative.
+4. Probe timing: after a trip at t0, the first probe is allowed at
+   t0 + 30 s. After a probe fails at t1, the next one is allowed at t1 + 60 s,
+   then + 120, + 240, + 300 and + 300 s. Only one probe runs at a time, and no
+   probe starts without an incoming query that would have gone to the
+   alternative.
+5. A successful probe sends queries back to the alternative. The next trip
+   starts with a 30 s backoff.
+6. A network change resets the breaker to `healthy(0)` and triggers one
+   probe. A single failed probe doesn't trip it. With the alternative off,
+   a network change does nothing.
+7. Stale results: a failure from a query or probe started before a trip or a
+   reset doesn't change the state.
 8. `1.168.192.in-addr.arpa`, `epdg.epc.mnc260.mcc310.pub.3gppnetwork.org`
-   and `fritz.box` go to `network` with the alternative healthy, under both
-   fallback policies. `example.com` and `notlocal.com` don't match.
-9. `local` (`SOA`) and `printer.local` (`A`) get NXDOMAIN from the router
-   with **no** upstream called, with the alternative on and with it off.
-10. Policy `.none`: when the alternative fails on a query, or is down, the
-   router throws (the client gets SERVFAIL) and never calls `network`.
-   Network-only names still go to `network`.
-11. `ResolverStatus` and `isEncrypted` are correct for each case: network →
-   unencrypted. DoH alternative healthy → encrypted. UDP alternative healthy
-   → unencrypted. `fallingBack` → unencrypted. `failing` → no lookups.
-12. `ResolverStatusPresentation` returns the exact strings, icons and colours
-   in item 7 for each status, including the banner for `fallingBack` and
-   `failing`, and no banner otherwise.
-13. Through `DNSProxyEngine` with a `ResolverRouter` upstream, a blocked name
-   never reaches either upstream, including blocked names under network-only
-   zones.
-14. If both upstreams fail, the client gets SERVFAIL.
-15. Migration: no stored config or a stored `.network` config gives
-    `useAlternative == false`. A stored DoH config gives
-    `useAlternative == true` with that config kept. Migrated settings always
-    have `fallbackPolicy == .networkDNS`.
-16. `ResolverSettings` and `ResolverStatus` round-trip through
-    `TunnelIPCCoder`.
-17. All existing tests pass.
+   and `fritz.box` go to `network` under both policies and don't trigger a
+   probe. `example.com` and `notlocal.com` don't match.
+9. `local` (`SOA`) and `printer.local` (`A`) get NXDOMAIN with **no**
+   upstream called, with the alternative on and off.
+10. Policy `.none`: when the alternative fails or is down, the router throws
+    and never calls `network`. Network-only names still go to `network`.
+11. `router.status` and `isEncrypted`:
+    - off → `network`, unencrypted
+    - DoH healthy → `alternative`, encrypted
+    - UDP healthy → `alternative`, unencrypted
+    - down with `.networkDNS` → `fallingBack`, unencrypted
+    - down with `.none` → `failing`, unencrypted
+12. Through `DNSProxyEngine` with a `ResolverRouter` upstream, a blocked name
+    never reaches any upstream.
+13. With policy `.networkDNS`, if both upstreams fail, the client gets
+    SERVFAIL.
+14. Migration (`SharedSettingsTests`):
+    - `upstreamConfig` missing or `.network` → `useAlternative == false`
+    - DoH Cloudflare → `true`, name `"Cloudflare"`
+    - UDP `9.9.9.9` → `true`, name `"Quad9 (UDP)"`
+    - unknown DoH URL → `"Custom"`
+    - all of them with `.networkDNS`
+    - nothing is written when `resolverSettings` is missing
+15. `ResolverSettings`, `ResolverStatus` and `TunnelRuntimeStats` (with and
+    without `resolverStatus`) round-trip through `TunnelIPCCoder`.
+16. All existing tests pass, and `IBlockerKit` still builds on Linux.
 
 Code review:
 
-18. Every event in the Logging table is logged at the stated level through
-    `os.Logger` (or the `IBlockerKit` wrapper) with subsystem `com.iblocker`.
-    Domain names appear only in `debug` messages. `IBlockerKit` still builds
-    and tests on Linux.
+17. `DNSProxyEngine.swift` is unchanged. `setUpstream` no longer exists in
+    `TunnelIPC.swift` or `TunnelController.swift`. Every event in the Logging
+    table is present, and domain names appear only in `debug` messages.
 
 Build:
 
-19. `cd ios && xcodegen generate && xcodebuild build -project IBlocker.xcodeproj -scheme IBlocker -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO`
+18. `cd ios && xcodegen generate && xcodebuild build -project IBlocker.xcodeproj -scheme IBlocker -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO`
     succeeds.
 
-On device (manual, by the user):
+On device (manual, by the user; check with a pymobiledevice3 log stream,
+see docs/LOGGING.md):
 
-20. With the alternative off, the Dashboard shows "Network DNS".
-21. With the alternative set to Cloudflare, the Dashboard shows "Cloudflare".
-22. With a custom DoH URL `https://192.0.2.1/dns-query` (unreachable) and
-    fallback on, browsing still works. After a few lookups, the Dashboard
-    shows the orange "Encrypted DNS unavailable" banner and the status
-    "Network DNS — Custom unreachable, retrying". After switching to
-    Cloudflare the banner disappears and the row shows the green "Encrypted
-    DNS · Cloudflare".
-23. Same unreachable URL with **"Don't fall back"**: sites stop loading, and
-    the red "DNS lookups are failing" banner shows. Switching fallback back
-    on restores browsing.
-24. With the alternative off, the Dashboard shows the orange "Unencrypted DNS
-    · Network DNS" row with its caption.
-25. `raspberrypi.local` (or any `.local` device) still resolves with the
-    alternative on and off. In a log stream, the `local` `SOA` lookups on a
-    network change are answered at once, not after 3 s.
+19. With the alternative set to Cloudflare, the `router` category shows
+    lookups going to the alternative.
+20. With the custom DoH URL `https://192.0.2.1/dns-query` and fallback on,
+    browsing keeps working, and the log shows a trip "falling back to network
+    DNS (unencrypted)" and periodic probes.
+21. The same URL with "Don't fall back": sites stop loading, and the log
+    shows "lookups failing (fallback off)". Turning fallback back on restores
+    browsing.
+22. `raspberrypi.local` still resolves. On a network change, the `local`
+    `SOA` lookups are answered at once, with no 3 s timeouts in the
+    `network-dns` category.
 
 ## Scope
 
-**In scope:** items 1–9.
+**In scope:** items 1–7.
 
 **Out of scope:**
-- Showing encryption state in widgets or Control Center, and notifications
-  when falling back. Possible follow-ups.
-- The "block everything while rules aren't loaded" filtering policy. That's
-  in the roadmap, under the health indicator.
-- Protection profiles.
-- DNS cache (KI-9). Large answers and TCP (KI-2).
-- New protocols (DoT, DoQ, DNSCrypt) or new provider presets.
-- "System encrypted DNS" (`DNSSettingsView`) and the profile export.
-- Any third-party DNS library.
+- The Dashboard and Settings encryption status line (follow-up spec).
+- Widgets, Control Center and notifications for encryption state.
+- DNS cache (KI-9), large answers and TCP (KI-2), new protocols, new
+  presets.
+- The "block everything while rules aren't loaded" policy (roadmap, health
+  indicator).
+- Profiles. Any third-party DNS library.
 
 ## Pending Decisions
 
 - **Retry timings** (3 failures, 2 s timeout, 30 s to 300 s backoff) are
   starting values. Revisit after use.
-- **Probe target** `apple.com A`. Change it if it's ever blocked by a list.
+- **Probe target:** `apple.com A`. Change it if a list ever blocks it.
