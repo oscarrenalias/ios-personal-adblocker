@@ -10,7 +10,8 @@ import IBlockerTunnelKit
 /// and forwards the rest to the configured upstream.
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
-    private static let log = Logger(subsystem: "com.iblocker.tunnel", category: "provider")
+    private static let log = Log(category: "tunnel")
+    private static let pathLog = Log(category: "path")
 
     private var engine: DNSProxyEngine?
     private var paths: AppGroupPaths?
@@ -49,14 +50,29 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         pathMonitor?.cancel()
         let box = physicalInterface
         let monitor = NWPathMonitor()
+        // Only touched from the path monitor queue.
+        var previous: String = "none"
         monitor.pathUpdateHandler = { path in
             let selected = path.availableInterfaces.first {
                 $0.type == .wifi || $0.type == .cellular || $0.type == .wiredEthernet
             }
             box.set(selected.map { UInt32($0.index) })
+            let current = selected.map { Self.describe($0) } ?? "none"
+            if current != previous {
+                Self.pathLog.info("selected interface \(previous) → \(current), path status \(String(describing: path.status))")
+                previous = current
+            }
+            if selected == nil {
+                let types = path.availableInterfaces.map { String(describing: $0.type) }.joined(separator: ", ")
+                Self.pathLog.notice("no usable physical interface, path status \(String(describing: path.status)), available interface types [\(types)]")
+            }
         }
         monitor.start(queue: pathQueue)
         pathMonitor = monitor
+    }
+
+    private static func describe(_ interface: NWInterface) -> String {
+        "\(interface.name) (index \(interface.index), \(String(describing: interface.type)))"
     }
 
     override func startTunnel(options: [String: NSObject]?) async throws {
@@ -72,7 +88,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let upstreamConfig = settings?.upstreamConfig ?? .default
         startPathMonitor()
         guard let upstream = makeUpstream(upstreamConfig) else {
-            Self.log.error("invalid upstream config")
+            Self.log.error("invalid upstream config at start: kind \(String(describing: upstreamConfig.kind)), reason: upstream could not be built")
             pathMonitor?.cancel()
             pathMonitor = nil
             throw NEVPNError(.configurationInvalid)
@@ -137,14 +153,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         try await setTunnelNetworkSettings(networkSettings)
         settings?.protectionActive = true
 
-        Self.log.info("tunnel up — \(matcher.blockedEntryCount) rules, upstream \(upstreamConfig.displayName, privacy: .public), available memory \(os_proc_available_memory())")
+        Self.log.notice("tunnel up — \(matcher.blockedEntryCount) rules, upstream \(upstreamConfig.displayName), available memory \(os_proc_available_memory())")
 
         startPacketLoop()
         startMaintenance(paths: paths)
     }
 
     override func stopTunnel(with reason: NEProviderStopReason) async {
-        Self.log.info("tunnel stopping: \(String(describing: reason), privacy: .public)")
+        Self.log.notice("tunnel stopping: \(String(describing: reason))")
         maintenanceTask?.cancel()
         pathMonitor?.cancel()
         pathMonitor = nil
@@ -183,8 +199,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         case .setUpstream(let config):
             if let upstream = makeUpstream(config) {
                 await engine.setUpstream(upstream)
+                Self.log.notice("setUpstream applied: \(config.displayName)")
                 response = .ok
             } else {
+                Self.log.error("setUpstream failed: kind \(String(describing: config.kind)), reason: upstream could not be built")
                 response = .failure("invalid upstream config")
             }
 
