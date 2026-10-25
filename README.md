@@ -203,15 +203,19 @@ Full trade-offs in [docs/BLOCKING-MODES.md](docs/BLOCKING-MODES.md).
 the Network Extension entitlement to paid accounts. Xcode 26+, iOS 26+ on the
 device. (The Safari blocker and profile export work with free signing.)
 
-1. Clone and open `ios/IBlocker.xcodeproj`.
-2. Edit **[`ios/Config/Signing.xcconfig`](ios/Config/Signing.xcconfig)** — your
-   Team ID and a bundle prefix you control:
+1. Edit **[`ios/project.yml`](ios/project.yml)** — your Team ID and a bundle
+   prefix you control:
+   ```yaml
+   DEVELOPMENT_TEAM: ABCDE12345
+   BUNDLE_ID_PREFIX: com.yourname
    ```
-   DEVELOPMENT_TEAM = ABCDE12345
-   BUNDLE_ID_PREFIX = com.yourname
+2. Generate the Xcode project with [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+   (`brew install xcodegen`) and open it:
+   ```bash
+   cd ios && xcodegen generate && open IBlocker.xcodeproj
    ```
-   (Or put the same two lines in `ios/Config/Signing.local.xcconfig`, which is
-   gitignored and overrides the tracked file.)
+   The `.xcodeproj` is generated and gitignored — re-run `xcodegen generate`
+   after editing `project.yml` or adding files.
 3. Select the **IBlocker** scheme, pick your iPhone, hit **Run**. Automatic
    signing creates the App IDs, App Group, and VPN entitlement on first build.
 4. On the phone: onboarding downloads the blocklist → **Enable protection** →
@@ -302,7 +306,7 @@ ios/                    The iOS/iPadOS app
   PacketTunnel/              NEPacketTunnelProvider extension
   ContentBlocker/            Safari content blocker extension
   Widgets/                   WidgetKit + Control Center toggle
-  Config/                    xcconfigs — Signing.xcconfig is the only edit
+  project.yml                XcodeGen spec — team, bundle IDs, build settings
 android/                The Android app
   core/                      Kotlin/JVM engine — the IBlockerKit port
   app/                       VpnService, DoH/UDP upstreams, Compose UI,

@@ -38,8 +38,10 @@ jobs:
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
-      - name: Lint project file
-        run: plutil -lint ios/IBlocker.xcodeproj/project.pbxproj
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
       - name: List targets and schemes
         run: xcodebuild -list -project ios/IBlocker.xcodeproj
       - name: Build app + extensions

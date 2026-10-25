@@ -2,16 +2,18 @@
 
 ## TL;DR
 
-Edit `ios/Config/Signing.xcconfig`:
+Edit the project-level `settings.base` in `ios/project.yml`:
 
-```
-DEVELOPMENT_TEAM = ABCDE12345      // Team ID from developer.apple.com → Membership
-BUNDLE_ID_PREFIX = com.yourname
+```yaml
+DEVELOPMENT_TEAM: ABCDE12345      # Team ID from developer.apple.com → Membership
+BUNDLE_ID_PREFIX: com.yourname
 ```
 
-Open `ios/IBlocker.xcodeproj`, select your device, Run. Xcode's automatic
-signing registers everything (App IDs, App Group, VPN capability) on first
-build.
+Then `cd ios && xcodegen generate`, open `ios/IBlocker.xcodeproj`, select
+your device, Run. Xcode's automatic signing registers everything (App IDs,
+App Group, VPN capability) on first build. Never edit build settings in
+Xcode's UI — the project is regenerated from `project.yml` and those edits
+are lost.
 
 ## What gets derived
 
@@ -20,12 +22,14 @@ build.
 | App bundle ID | `$(BUNDLE_ID_PREFIX).iblocker` |
 | Tunnel extension | `$(BUNDLE_ID_PREFIX).iblocker.tunnel` |
 | Safari blocker | `$(BUNDLE_ID_PREFIX).iblocker.blocker` |
+| Widgets | `$(BUNDLE_ID_PREFIX).iblocker.widgets` |
 | App Group | `group.$(BUNDLE_ID_PREFIX).iblocker` |
 
 Extension IDs are prefixed by the app ID (an Apple requirement for embedded
-extensions), and the App Group is stamped into each target's Info.plist as
-`AppGroupID`, which is how the code discovers it at runtime — nothing is
-hardcoded in Swift.
+extensions). The App Group is stamped into each target's Info.plist as
+`AppGroupID` (how the code discovers it at runtime) and into each
+`.entitlements` file as `$(APP_GROUP_ID)` — nothing is hardcoded in Swift or
+in the entitlements.
 
 ## Why a paid account is required
 
