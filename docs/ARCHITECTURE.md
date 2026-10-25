@@ -120,6 +120,34 @@ is replaced in memory by the Quad9 preset config and name (nothing is written
 back; other URLs are untouched) and logged once per process. At boot, until
 settings are readable, the router runs with defaults and is rebuilt on recovery.
 
+## List update pipeline
+
+`FilterListStore` (`IBlockerKit/Lists`) is an actor and the only owner of
+load/modify/save of the list state (`sources.json`), so the app, the
+background refresh, the Shortcuts intent and the Lists screen can't lose each
+other's updates (KI-14). Callers use `updateAll(force:trigger:)`, `mutate` and
+`compile`. A call that arrives during a run awaits it instead of downloading
+again.
+
+For each enabled list, `FilterListUpdater` does a conditional GET (ETag /
+Last-Modified), writes the body to a temp file, and runs
+`FilterListValidator` on it. The validator rejects HTML pages, empty lists, lists where
+more than 50% of non-comment lines don't parse, and lists with fewer than 50%
+of the previous entry count. A rejected download is discarded and its reason
+is stored as the list's `lastRejection`, so the last good copy stays in use.
+An accepted one replaces the cached copy atomically (`replaceItemAt`), then
+the store recompiles the blobs if anything changed. `force` only bypasses the
+conditional-GET shortcut for lists that already have a cached file.
+
+`ListFreshness` flags a list as stale when its last accepted update is more
+than 7 days old. The Lists screen shows the age, a Stale badge and the
+rejection reason.
+
+Updates start from four triggers (logged): the user, the stale check at app
+launch, the Shortcuts intent, and `ListRefreshScheduler`, which submits a
+`BGAppRefreshTask` (earliest 6 h out; needs `UIBackgroundModes` → `fetch`).
+Everything logs under category `lists`.
+
 ## Memory (the 50 MB extension budget)
 
 The compiled blocklist is a flat file: 32-byte header + sorted `u64`
@@ -141,7 +169,7 @@ Everything shared lives in the App Group container:
 | `blocklist.bin`, `allowlist.bin`, `denylist.bin` | app (compiler) | tunnel (mmap) |
 | `querylog.ring` (4 MB fixed ring, 64 B records) | tunnel | app (1 Hz tail) |
 | `stats.json` | tunnel (2 s cadence) | app (fallback when tunnel unreachable) |
-| `sources.json` | app | app |
+| `sources.json` | app (via `FilterListStore`) | app |
 | `contentblocker.json` | app | Safari extension |
 | shared `UserDefaults` | app | tunnel (resolver settings, log toggle) |
 

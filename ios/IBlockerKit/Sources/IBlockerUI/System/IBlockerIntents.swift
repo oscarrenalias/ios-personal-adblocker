@@ -75,19 +75,13 @@ struct UpdateListsIntent: AppIntent {
     static var openAppWhenRun = false
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let paths = AppEnvironment.paths
-        try? paths.ensureDirectories()
-        var state = FilterListState.load(from: paths.filterStateURL)
-        let summary = await FilterListUpdater(paths: paths).update(state: &state)
-        let stats = try? BlocklistCompiler.compile(state: &state, paths: paths)
-        try? state.save(to: paths.filterStateURL)
+        let summary = await AppEnvironment.listStore.updateAll(force: true, trigger: .shortcut)
         AppEnvironment.settings.lastListUpdate = Date()
         VPNControl.reloadWidgets()
-        let count = stats?.blockedEntryCount ?? 0
         if summary.failedSourceIDs.isEmpty {
-            return .result(dialog: "Lists updated — \(count) rules active.")
+            return .result(dialog: "Lists updated.")
         }
-        return .result(dialog: "Lists updated with some errors — \(count) rules active.")
+        return .result(dialog: "Lists updated with some errors.")
     }
 }
 

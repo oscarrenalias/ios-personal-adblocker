@@ -20,6 +20,8 @@ public struct FetchResult: Sendable {
 public struct UpdateSummary: Sendable, Equatable {
     public var updatedSourceIDs: [String] = []
     public var unchangedSourceIDs: [String] = []
+    /// Downloaded fine but failed validation; the previous list stays in use.
+    public var rejectedSourceIDs: [String] = []
     public var failedSourceIDs: [String: String] = [:]
 
     public var anyChanged: Bool { !updatedSourceIDs.isEmpty }
@@ -58,6 +60,7 @@ public struct FilterListUpdater: Sendable {
 
     private let fetch: Fetch
     private let paths: AppGroupPaths
+    private let log = Log(category: "lists")
 
     public init(paths: AppGroupPaths, fetch: @escaping Fetch) {
         self.paths = paths
@@ -113,27 +116,68 @@ public struct FilterListUpdater: Sendable {
                 switch result.statusCode {
                 case 200:
                     guard !result.body.isEmpty else { throw FilterListUpdateError.emptyBody }
-                    try result.body.write(to: paths.cachedListURL(sourceID: source.id), options: .atomic)
-                    metadata.etag = result.etag
-                    metadata.lastModified = result.lastModified
-                    metadata.lastFetched = Date()
-                    metadata.lastError = nil
-                    summary.updatedSourceIDs.append(source.id)
+                    let now = Date()
+                    let previousCount = metadata.entryCount > 0 ? metadata.entryCount : nil
+                    let destination = paths.cachedListURL(sourceID: source.id)
+                    let temp = destination.deletingLastPathComponent()
+                        .appendingPathComponent(".\(source.id).download-\(UUID().uuidString)")
+                    defer { try? FileManager.default.removeItem(at: temp) }
+                    try result.body.write(to: temp)
+
+                    let text = String(decoding: result.body, as: UTF8.self)
+                    switch FilterListValidator.validate(text, previousCount: previousCount) {
+                    case .reject(let reason):
+                        try? FileManager.default.removeItem(at: temp)
+                        metadata.lastRejection = reason
+                        metadata.lastChecked = now
+                        log.notice("list \(source.id) rejected: \(reason) (new \(FilterListParser.parse(text).blockDomains.count), previous \(Self.countDescription(previousCount)))")
+                        summary.rejectedSourceIDs.append(source.id)
+                    case .accept(let entryCount):
+                        try replace(destination, with: temp)
+                        metadata.etag = result.etag
+                        metadata.lastModified = result.lastModified
+                        metadata.lastFetched = now
+                        metadata.lastAccepted = now
+                        metadata.lastChecked = now
+                        metadata.entryCount = entryCount
+                        metadata.lastError = nil
+                        metadata.lastRejection = nil
+                        log.info("list \(source.id) accepted: \(entryCount) entries, previous \(Self.countDescription(previousCount)), \(result.body.count) bytes")
+                        summary.updatedSourceIDs.append(source.id)
+                    }
                 case 304:
-                    metadata.lastFetched = Date()
+                    let now = Date()
+                    metadata.lastFetched = now
+                    metadata.lastChecked = now
                     metadata.lastError = nil
+                    metadata.lastRejection = nil
                     summary.unchangedSourceIDs.append(source.id)
                 default:
                     throw FilterListUpdateError.httpStatus(result.statusCode)
                 }
             } catch {
                 metadata.lastError = shortDescription(of: error)
+                metadata.lastChecked = Date()
+                log.notice("list \(source.id) update failed: \(metadata.lastError ?? "unknown")")
                 summary.failedSourceIDs[source.id] = metadata.lastError
             }
             state.metadata[source.id] = metadata
         }
 
         return summary
+    }
+
+    private func replace(_ destination: URL, with temp: URL) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: destination.path) {
+            _ = try fm.replaceItemAt(destination, withItemAt: temp)
+        } else {
+            try fm.moveItem(at: temp, to: destination)
+        }
+    }
+
+    private static func countDescription(_ count: Int?) -> String {
+        count.map(String.init) ?? "n/a"
     }
 
     private func shortDescription(of error: Error) -> String {

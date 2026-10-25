@@ -23,30 +23,54 @@ public enum ListRefreshScheduler {
         schedule()
     }
 
+    private static let log = Log(category: "app")
+
     public static func schedule() {
         let request = BGAppRefreshTaskRequest(identifier: AppEnvironment.refreshTaskID)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 6 * 3600)
-        try? BGTaskScheduler.shared.submit(request)
+        let earliest = Date(timeIntervalSinceNow: 6 * 3600)
+        request.earliestBeginDate = earliest
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            log.info("background refresh scheduled (earliest \(earliest))")
+        } catch {
+            log.error("background refresh submit failed: \(error)")
+        }
     }
 
     static func handle(_ task: BGAppRefreshTask) {
+        // Whichever of completion/expiration comes first completes the task;
+        // iOS treats a second setTaskCompleted as a programming error.
+        let completion = Completion(task)
         let work = Task {
-            let paths = AppEnvironment.paths
-            try? paths.ensureDirectories()
-            var state = FilterListState.load(from: paths.filterStateURL)
-            let updater = FilterListUpdater(paths: paths)
-            let summary = await updater.update(state: &state)
+            let summary = await AppEnvironment.listStore.updateAll(force: false, trigger: .background)
             if summary.anyChanged {
-                _ = try? BlocklistCompiler.compile(state: &state, paths: paths)
                 AppEnvironment.settings.lastListUpdate = Date()
             }
-            try? state.save(to: paths.filterStateURL)
             schedule()
-            task.setTaskCompleted(success: summary.failedSourceIDs.isEmpty)
+            let success = summary.failedSourceIDs.isEmpty
+            log.notice("background refresh ran: \(success ? "success" : "partial failure")")
+            completion.finish(success: success)
         }
         task.expirationHandler = {
             work.cancel()
-            task.setTaskCompleted(success: false)
+            log.notice("background refresh expired")
+            completion.finish(success: false)
+        }
+    }
+
+    private final class Completion: @unchecked Sendable {
+        private let lock = NSLock()
+        private var done = false
+        private let task: BGAppRefreshTask
+
+        init(_ task: BGAppRefreshTask) { self.task = task }
+
+        func finish(success: Bool) {
+            lock.lock()
+            let first = !done
+            done = true
+            lock.unlock()
+            if first { task.setTaskCompleted(success: success) }
         }
     }
 }

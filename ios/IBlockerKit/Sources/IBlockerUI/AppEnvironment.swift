@@ -14,6 +14,9 @@ public enum AppEnvironment {
             ?? AppGroupPaths(containerURL: FileManager.default.temporaryDirectory)
     }
 
+    /// The single shared store; all list mutations and updates go through it.
+    public static let listStore = FilterListStore(paths: paths)
+
     public static var settings: SharedSettings {
         SharedSettings(groupID: groupID) ?? SharedSettings(defaults: .standard)
     }
