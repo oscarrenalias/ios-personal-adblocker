@@ -20,6 +20,8 @@ public struct FetchResult: Sendable {
 public struct UpdateSummary: Sendable, Equatable {
     public var updatedSourceIDs: [String] = []
     public var unchangedSourceIDs: [String] = []
+    /// Downloaded fine but failed validation; the previous list stays in use.
+    public var rejectedSourceIDs: [String] = []
     public var failedSourceIDs: [String: String] = [:]
 
     public var anyChanged: Bool { !updatedSourceIDs.isEmpty }
@@ -129,7 +131,7 @@ public struct FilterListUpdater: Sendable {
                         metadata.lastRejection = reason
                         metadata.lastChecked = now
                         log.notice("list \(source.id) rejected: \(reason) (new \(FilterListParser.parse(text).blockDomains.count), previous \(Self.countDescription(previousCount)))")
-                        summary.unchangedSourceIDs.append(source.id)
+                        summary.rejectedSourceIDs.append(source.id)
                     case .accept(let entryCount):
                         try replace(destination, with: temp)
                         metadata.etag = result.etag
