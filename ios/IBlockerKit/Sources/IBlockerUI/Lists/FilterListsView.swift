@@ -98,12 +98,25 @@ private struct SourceRow: View {
                     if source.enabled, metadata.entryCount > 0 {
                         Text("\(metadata.entryCount.formatted()) rules")
                     }
-                    if let fetched = metadata.lastFetched {
-                        Text(ListAgeText.updated(since: fetched, now: Date()))
+                    if let accepted = metadata.lastAccepted {
+                        Text(ListAgeText.updated(since: accepted, now: Date()))
+                        if ListFreshness.isStale(lastAccepted: accepted, now: Date()) {
+                            Text("Stale")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+
+                if let reason = metadata.lastRejection {
+                    Text(rejectionText(reason: reason, accepted: metadata.lastAccepted))
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if let error = metadata.lastError {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -124,6 +137,15 @@ private struct SourceRow: View {
             }
         }
     }
+}
+
+private func rejectionText(reason: String, accepted: Date?) -> String {
+    var text = "Update rejected: \(reason)."
+    if let accepted {
+        let age = ListAgeText.updated(since: accepted, now: Date()).replacingOccurrences(of: "updated ", with: "")
+        text += " Using the version from \(age)."
+    }
+    return text
 }
 
 private struct AddCustomListSheet: View {
