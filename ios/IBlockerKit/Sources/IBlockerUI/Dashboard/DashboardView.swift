@@ -5,8 +5,11 @@ import IBlockerKit
 public struct DashboardView: View {
     @Environment(TunnelController.self) private var tunnel
     @Environment(QueryLogViewModel.self) private var log
+    @Environment(\.switchToSettings) private var switchToSettings
     @State private var fileStats = BlockerStats()
     @State private var compiledRuleCount: UInt64 = 0
+
+    private static let uiLog = Log(category: "ui")
 
     public init() {}
 
@@ -56,8 +59,7 @@ public struct DashboardView: View {
         Group {
             switch tunnel.state {
             case .connected:
-                Label("Protected — DNS filtering active", systemImage: "checkmark.shield.fill")
-                    .foregroundStyle(.green)
+                connectedStatus
             case .connecting:
                 Label("Connecting…", systemImage: "arrow.triangle.2.circlepath")
                     .foregroundStyle(.secondary)
@@ -79,6 +81,52 @@ public struct DashboardView: View {
             }
         }
         .font(.callout.weight(.medium))
+        .onChange(of: resolverPresentation.tone) { old, new in
+            // Fires on tone change only (not per poll); skip leaving the connected state.
+            guard tunnel.state == .connected else { return }
+            Self.uiLog.info("Resolver status tone \(String(describing: old)) -> \(String(describing: new)): \(resolverPresentation.mainLine)")
+        }
+    }
+
+    private var resolverPresentation: ResolverStatusPresentation {
+        ResolverStatusPresentation(
+            tunnelConnected: tunnel.state == .connected,
+            resolverStatus: tunnel.runtimeStats?.resolverStatus
+        )
+    }
+
+    private var connectedStatus: some View {
+        let presentation = resolverPresentation
+        return VStack(spacing: 4) {
+            Label(presentation.mainLine, systemImage: presentation.icon)
+                .foregroundStyle(color(for: presentation.tone))
+                .multilineTextAlignment(.center)
+            if let caption = presentation.caption {
+                Text(caption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            if presentation.showsDNSSettingsButton {
+                Button("DNS settings") {
+                    Self.uiLog.debug("DNS settings tapped: \(presentation.mainLine) (\(String(describing: presentation.tone)))")
+                    switchToSettings()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private func color(for tone: ResolverStatusPresentation.Tone) -> Color {
+        switch tone {
+        case .positive: .green
+        case .warning: .orange
+        case .critical: .red
+        case .neutral: .secondary
+        }
     }
 
     @ViewBuilder

@@ -2,7 +2,25 @@
 import SwiftUI
 import IBlockerKit
 
+/// Identifies each top-level tab in `RootView`.
+enum RootTab: Hashable {
+    case dashboard, log, lists, settings
+}
+
+private struct SwitchToSettingsKey: EnvironmentKey {
+    static let defaultValue: @MainActor () -> Void = {}
+}
+
+extension EnvironmentValues {
+    /// Call to switch the root TabView to the Settings tab.
+    var switchToSettings: @MainActor () -> Void {
+        get { self[SwitchToSettingsKey.self] }
+        set { self[SwitchToSettingsKey.self] = newValue }
+    }
+}
+
 public struct RootView: View {
+    @State private var selectedTab: RootTab = .dashboard
     @State private var tunnel = TunnelController()
     @State private var lists: FilterListsViewModel
     @State private var log: QueryLogViewModel
@@ -18,17 +36,17 @@ public struct RootView: View {
     }
 
     public var body: some View {
-        TabView {
-            Tab("Dashboard", systemImage: "shield.lefthalf.filled") {
+        TabView(selection: $selectedTab) {
+            Tab("Dashboard", systemImage: "shield.lefthalf.filled", value: RootTab.dashboard) {
                 DashboardView()
             }
-            Tab("Log", systemImage: "list.bullet.rectangle.portrait") {
+            Tab("Log", systemImage: "list.bullet.rectangle.portrait", value: RootTab.log) {
                 QueryLogView()
             }
-            Tab("Lists", systemImage: "checklist") {
+            Tab("Lists", systemImage: "checklist", value: RootTab.lists) {
                 FilterListsView()
             }
-            Tab("Settings", systemImage: "gearshape") {
+            Tab("Settings", systemImage: "gearshape", value: RootTab.settings) {
                 SettingsView()
             }
         }
@@ -36,6 +54,7 @@ public struct RootView: View {
         .environment(tunnel)
         .environment(lists)
         .environment(log)
+        .environment(\.switchToSettings, { selectedTab = .settings })
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView(isPresented: $showOnboarding)
                 .environment(tunnel)

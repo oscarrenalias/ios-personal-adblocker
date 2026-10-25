@@ -59,6 +59,10 @@ unreachable, retrying".
 before planning it. Add the filtering policy to the health work (5), which
 already owns the "rules not loaded" state.
 
+**Status:** the encryption part is done. The "Never fall back" setting and the
+status line (Dashboard and Settings) showing encryption state and fallback
+warnings (`spec-d10b070a`) are in. The filtering policy is still open.
+
 ## Reliable blocklist updates
 
 **Want:** download and validate before replacing the active list, keep the

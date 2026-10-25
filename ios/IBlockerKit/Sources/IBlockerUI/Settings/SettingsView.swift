@@ -49,6 +49,10 @@ public struct SettingsView: View {
                 }
 
                 Section {
+                    if let status = resolverStatusPresentation {
+                        Label(status.mainLine, systemImage: status.icon)
+                            .foregroundStyle(Self.color(for: status.tone))
+                    }
                     Toggle("Use alternative DNS", isOn: useAlternativeBinding)
                     if resolver.useAlternative {
                         Picker("Provider", selection: presetBinding) {
@@ -157,6 +161,9 @@ public struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .task {
+                await refreshLoop()
+            }
             .onAppear {
                 // The Blocking Test screen can switch the strategy too.
                 relayStrategy = AppEnvironment.settings.relayStrategy
@@ -164,6 +171,28 @@ public struct SettingsView: View {
                 verboseLogging = AppEnvironment.settings.verboseLoggingUntil != nil
                 Log.setVerbose(verboseLogging)
             }
+        }
+    }
+
+    /// Nil when the tunnel isn't connected or has reported no stats yet.
+    private var resolverStatusPresentation: ResolverStatusPresentation? {
+        guard tunnel.state == .connected, let stats = tunnel.runtimeStats else { return nil }
+        return ResolverStatusPresentation(tunnelConnected: true, resolverStatus: stats.resolverStatus)
+    }
+
+    private static func color(for tone: ResolverStatusPresentation.Tone) -> Color {
+        switch tone {
+        case .positive: return .green
+        case .warning: return .orange
+        case .critical: return .red
+        case .neutral: return .secondary
+        }
+    }
+
+    private func refreshLoop() async {
+        while !Task.isCancelled {
+            await tunnel.refreshStats()
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
         }
     }
 
