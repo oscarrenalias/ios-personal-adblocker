@@ -195,3 +195,22 @@ catch new concurrency mistakes.
 The app (`FilterListsViewModel`) and the background refresh
 (`ListRefreshScheduler`) can both load, modify and save `sources.json`, with
 nothing coordinating them. Unlikely to cause problems, but not safe.
+
+### KI-15: `.local` lookups through Network DNS time out after 3 s
+
+- **Status:** open. Found on device on 2026-10-25 (pymobiledevice3 capture).
+- **Where:** `ios/IBlockerKit/Sources/IBlockerTunnelKit/NetworkDNSUpstream.swift`
+
+On network changes, iOS sends a unicast `SOA` query for `local` through the
+tunnel (6 times in a 3-minute capture). `DNSServiceQueryRecord` treats
+`.local` as multicast DNS, so the query never gets a unicast answer. It times
+out after 3 s and the client gets SERVFAIL. Each one holds an in-flight slot
+for 3 s. Browsing isn't affected, and real `.local` names resolve over mDNS
+outside the tunnel.
+
+**Fix ideas:** answer `local` and `*.local` immediately with NXDOMAIN instead
+of forwarding them. One caveat: corporate networks that use `.local` in
+unicast DNS (Active Directory) wouldn't resolve those names through the tunnel
+either way. Decide before changing. Spec B
+(`alternative-resolver-with-failover-to-network-dns`) currently lists `local`
+as a network-only name, which would keep the timeout.

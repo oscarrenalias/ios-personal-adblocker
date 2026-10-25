@@ -86,6 +86,26 @@ path changes) using the same wrapper.
   from Xcode. For the tunnel extension, use Console.app, since the extension
   runs in its own process.
 
+## Streaming from the command line (recommended)
+
+The most reliable way to see the tunnel's logs, including `debug`, with no
+admin rights and no logging profile, is
+[pymobiledevice3](https://github.com/doronz88/pymobiledevice3), run through
+`uvx`:
+
+```bash
+xcrun devicectl list devices          # find the iPhone's UDID
+uvx pymobiledevice3 syslog live --udid <UDID> -m PacketTunnel
+```
+
+`-m PacketTunnel` keeps only the tunnel process. Our own lines show as
+`PacketTunnel{PacketTunnel.debug.dylib}`. Debug messages appear while the
+stream is running. To capture a fixed window to a file for analysis:
+
+```bash
+perl -e 'alarm 180; exec @ARGV' uvx pymobiledevice3 syslog live --udid <UDID> -m PacketTunnel > capture.log
+```
+
 ## Seeing debug messages on a device
 
 iOS doesn't record `debug` messages for our subsystem by default, and a
