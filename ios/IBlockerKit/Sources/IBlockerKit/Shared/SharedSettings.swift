@@ -57,6 +57,7 @@ public struct ResolverSettings: Codable, Sendable, Equatable {
 public struct SharedSettings: @unchecked Sendable {
     public enum Keys {
         public static let upstreamConfig = "upstreamConfig"
+        public static let resolverSettings = "resolverSettings"
         public static let onboardingComplete = "onboardingComplete"
         public static let queryLogEnabled = "queryLogEnabled"
         public static let lastListUpdate = "lastListUpdate"
@@ -100,6 +101,59 @@ public struct SharedSettings: @unchecked Sendable {
             if let data = try? JSONEncoder().encode(newValue) {
                 defaults.set(data, forKey: Keys.upstreamConfig)
             }
+        }
+    }
+
+    /// The user's resolver choice. When `resolverSettings` has never been
+    /// written, it is derived from the legacy `upstreamConfig` on read; nothing
+    /// is written back and `upstreamConfig` is left untouched.
+    public var resolverSettings: ResolverSettings {
+        get {
+            if let data = defaults.data(forKey: Keys.resolverSettings),
+               let settings = try? JSONDecoder().decode(ResolverSettings.self, from: data) {
+                return settings
+            }
+            return migratedResolverSettings()
+        }
+        nonmutating set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Keys.resolverSettings)
+            }
+        }
+    }
+
+    private func migratedResolverSettings() -> ResolverSettings {
+        let old = upstreamConfig
+        let derived: ResolverSettings
+        switch old.kind {
+        case .network:
+            derived = .default
+        case .doh, .udp:
+            derived = ResolverSettings(
+                useAlternative: true,
+                alternative: old,
+                alternativeName: UpstreamPreset.name(for: old),
+                fallbackPolicy: .networkDNS)
+        }
+        if Self.migrationLogged.claim() {
+            Self.log.notice(
+                "resolver settings derived from legacy upstream (old kind \(old.kind.rawValue)): useAlternative=\(derived.useAlternative) alternative=\(derived.alternativeName) fallback=\(derived.fallbackPolicy.rawValue)")
+        }
+        return derived
+    }
+
+    private static let log = Log(category: "settings")
+    /// Reads happen on every tunnel tick; log the derivation once per process.
+    private static let migrationLogged = OnceFlag()
+
+    private final class OnceFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var done = false
+        func claim() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            if done { return false }
+            done = true
+            return true
         }
     }
 
