@@ -12,12 +12,12 @@ Written 2026-10-25.
 | # | Feature | Depends on | Size |
 |---|---|---|---|
 | 0 | Finish reboot robustness (defects `B-0d1e113d`, `B-28826355`) | — | in progress |
-| 1 | [Configurable failure policy](#configurable-failure-policy) (folded into the alternative resolver spec) | KI-1 part 1 (done) | M |
+| 1 | [Configurable failure policy](#configurable-failure-policy): encryption part folded into `spec-c7e3c45d` | KI-1 part 1 (done) | M |
 | 2 | [Reliable blocklist updates](#reliable-blocklist-updates) | — (can run alongside 1) | M |
 | 3 | [DNS caching](#dns-caching) | 1 (sits in front of the router) | M |
 | 4 | [Explain each decision](#explain-each-decision) + [Rule testing](#rule-testing) | 3 (to report "from cache") | L |
 | 5 | [Protection health indicator](#protection-health-indicator) | 0, 1 (status signals) | M |
-| 6 | [Quick controls and profiles](#quick-controls-and-profiles) | profiles defined (open question) | M |
+| 6 | [Quick controls](#quick-controls) (profiles dropped) | — | S |
 
 Why this order:
 - **1 first:** it decides how failures behave, and it's a small addition to a
@@ -162,10 +162,10 @@ blocking".
 - A single status: Healthy / Degraded (with the reason) / Not protected.
 - The filtering policy from "Configurable failure policy" above.
 
-## Quick controls and profiles
+## Quick controls
 
-**Want:** widgets, Shortcuts and a Control Center toggle for timed pauses and
-for switching protection profiles.
+**Want:** widgets, Shortcuts and a Control Center toggle for timed pauses.
+Profiles were **dropped** on 2026-10-25 to keep things simple.
 
 **Exists:**
 - Home and Lock Screen widgets.
@@ -173,8 +173,6 @@ for switching protection profiles.
 - Shortcuts: enable, disable, pause (5, 15 or 60 min), resume, update lists.
 
 **Missing:**
-- **Profiles,** which aren't defined yet. Open question: what does a profile
-  contain? For example, lists and resolver choice ("Strict", "Relaxed"),
-  per-network automatic switching, or something else.
-- Shortcuts and widget actions to switch profile.
 - Pause lengths in Control Center. Today the toggle is only on/off.
+- Possibly: show encryption state in widgets and Control Center (follow-up
+  from `spec-c7e3c45d`).
