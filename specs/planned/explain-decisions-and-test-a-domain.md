@@ -5,7 +5,7 @@ description: "Attribute each DNS decision to its rule and source, fix list excep
 dependencies: null
 priority: high
 complexity: null
-status: draft
+status: planned
 tags:
 - rules
 - query-log
@@ -14,7 +14,7 @@ tags:
 scope:
   in: null
   out: null
-feature_root_id: null
+feature_root_id: B-c577de9f
 ---
 # Explain decisions and test a domain
 
