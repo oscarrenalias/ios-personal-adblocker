@@ -28,6 +28,140 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private let errorLimiter = LockedBox(ErrorLogLimiter(interval: 60))
     private let physicalInterface = InterfaceIndexBox()
     private let pathQueue = DispatchQueue(label: "net.renalias.adblocker.tunnel.path")
+    private let notifier = StatusNotifier()
+
+    /// Drives status notification events 1-4, 6 and 7 through the policy and poster.
+    /// An actor so router callbacks, IPC and start/stop don't interleave
+    /// their load-decide-save of the shared episode state.
+    private actor StatusNotifier {
+        private let log = Log(category: "notify")
+        private var running = false
+        /// Last alternative resolver name seen, so a restore can name it.
+        private var lastResolverName: String?
+
+        /// Last pause deadline handed to the policy, so unchanged deadlines
+        /// don't reload and save the episode state every tick.
+        private var lastPauseDeadline: Date??
+        /// Event 7 is wanted but the shared settings were unreadable when
+        /// the tunnel started degraded; retried until they can be read.
+        private var degradedStartPending = false
+
+        func tunnelStarting() {
+            running = true
+            lastPauseDeadline = nil
+            degradedStartPending = false
+        }
+
+        /// Event 7: starts the 5 min degraded debounce.
+        func degradedStarted() async {
+            guard running else { return }
+            if await run([.problemStarted(.degraded)], resolverName: nil) {
+                degradedStartPending = false
+            } else {
+                degradedStartPending = true
+                log.debug("degraded notification deferred: settings unreadable")
+            }
+        }
+
+        /// Retries a deferred event 7 once settings are readable.
+        func retryDegradedStart() async {
+            guard degradedStartPending else { return }
+            await degradedStarted()
+        }
+
+        /// Cancels a pending event 7, or posts its restore (event 4).
+        func degradedEnded() async {
+            degradedStartPending = false
+            await run([.problemCleared(.degraded)], resolverName: nil)
+        }
+
+        /// Event 6: schedules, replaces or removes the pause-ended request.
+        func pauseDeadlineChanged(_ deadline: Date?) async {
+            guard running else { return }
+            if let last = lastPauseDeadline, last == deadline { return }
+            if await run([.pauseDeadline(deadline)], resolverName: nil) {
+                lastPauseDeadline = .some(deadline)
+            }
+        }
+
+        func resolverStatusChanged(_ status: ResolverStatus) async {
+            guard running else {
+                log.debug("resolver status change ignored: tunnel not running")
+                return
+            }
+            let name: String?
+            let events: [StatusNotificationEvent]
+            switch status {
+            case .fallingBack(let n):
+                name = n
+                events = [.problemStarted(.resolverFallback)]
+            case .failing(let n):
+                name = n
+                events = [.problemStarted(.resolverFailing)]
+            case .alternative(let n, _):
+                name = n
+                events = [.problemCleared(.resolverFallback), .problemCleared(.resolverFailing)]
+            case .network:
+                name = nil
+                events = [.problemCleared(.resolverFallback), .problemCleared(.resolverFailing)]
+            }
+            if let name { lastResolverName = name }
+            await run(events, resolverName: name ?? lastResolverName)
+        }
+
+        /// Event 3 on an unexpected stop; always ends pending 1, 2, 6, 7.
+        func tunnelStopped(reason: NEProviderStopReason) async {
+            running = false
+            let stopReason = TunnelStopReason(rawValue: reason.rawValue)
+            let marker = Self.settings()?.userTurnedOff ?? false
+            let classification = StatusNotificationPolicy.classifyStop(reason: stopReason, userTurnedOffMarker: marker)
+            log.notice("stop classified \(classification == .expected ? "expected" : "unexpected"): reason \(stopReason.logName), user-off marker \(marker ? "set" : "clear")")
+            var events: [StatusNotificationEvent] = [.tunnelStopped]
+            if classification == .unexpected { events.append(.problemStarted(.protectionStopped)) }
+            await run(events, resolverName: nil)
+        }
+
+        /// Cancels a pending event 3, or posts its restore (event 4).
+        func tunnelStarted() async {
+            running = true
+            await run([.problemCleared(.protectionStopped)], resolverName: nil)
+        }
+
+        private static func settings() -> SharedSettings? {
+            AppGroupPaths.groupID(from: Bundle.main).flatMap { SharedSettings(groupID: $0) }
+        }
+
+        /// Returns false when the events were skipped (settings unavailable).
+        @discardableResult
+        private func run(_ events: [StatusNotificationEvent], resolverName: String?) async -> Bool {
+            guard let settings = Self.settings() else {
+                log.error("notification events skipped: shared settings unavailable")
+                return false
+            }
+            guard settings.settingsAvailable else {
+                log.debug("notification events skipped: settings not yet readable")
+                return false
+            }
+            var state = StatusNotificationState.load(from: settings)
+            let preferences = StatusNotificationPreferences(settings: settings)
+            let now = Date()
+            var decisions: [StatusNotificationDecision] = []
+            for event in events {
+                let decision = StatusNotificationPolicy.decide(event: event, state: state, preferences: preferences, now: now)
+                state = decision.state
+                decisions.append(decision)
+            }
+            state.save(to: settings)
+            let poster = NotificationPoster(preferences: {
+                Self.settings().map { StatusNotificationPreferences(settings: $0) }
+                    ?? StatusNotificationPreferences(masterEnabled: false)
+            })
+            for decision in decisions {
+                await poster.execute(decision, now: now, resolverName: resolverName)
+            }
+            return true
+        }
+    }
 
     /// Thread-safe holder for the current physical interface index, written
     /// from the path monitor queue and read from upstream resolves.
@@ -78,7 +212,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             alternative = (upstream, settings.alternativeName, settings.alternative.isEncrypted)
         }
-        let router = ResolverRouter(network: network, alternative: alternative, policy: settings.fallbackPolicy)
+        let notifier = notifier
+        let router = ResolverRouter(
+            network: network,
+            alternative: alternative,
+            policy: settings.fallbackPolicy,
+            onStatusChange: { status in
+                Task { await notifier.resolverStatusChanged(status) }
+            }
+        )
         Self.log.notice("resolver settings applied: source \(source), alternative \(settings.useAlternative ? "on" : "off"), name \(settings.alternativeName), url \(settings.alternative.displayName), policy \(settings.fallbackPolicy.rawValue)")
         return router
     }
@@ -126,6 +268,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         self.paths = paths
         try? paths.ensureDirectories()
+        await notifier.tunnelStarting()
 
         let settings = SharedSettings(groupID: groupID)
         let settingsReadable = settings?.settingsAvailable ?? false
@@ -207,6 +350,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         try await setTunnelNetworkSettings(networkSettings)
         settings?.protectionActive = true
+        await notifier.tunnelStarted()
+        if recovery.isDegraded { await notifier.degradedStarted() }
 
         Self.log.notice("tunnel up — \(matcher.blockedEntryCount) rules, resolver \(resolverSettings.useAlternative ? resolverSettings.alternativeName : "Network DNS"), available memory \(os_proc_available_memory())")
 
@@ -224,6 +369,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
            let settings = SharedSettings(groupID: groupID) {
             settings.protectionActive = false
         }
+        await notifier.tunnelStopped(reason: reason)
         if let engine {
             await engine.flush()
         }
@@ -264,6 +410,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if let newRouter = makeRouter(resolverSettings, source: "ipc") {
                 await engine.setUpstream(newRouter)
                 router = newRouter
+                await notifier.resolverStatusChanged(newRouter.status)
                 response = .ok
             } else {
                 response = .failure("invalid resolver settings")
@@ -275,6 +422,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 settings.pausedUntil = until
             }
             await engine.setPaused(until: until)
+            await notifier.pauseDeadlineChanged(until)
             response = .ok
         }
         return try? TunnelIPCCoder.encode(response)
@@ -354,7 +502,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 // propagates within one tick.
                 if let settings, settingsReadable || !recovery.settingsPending {
                     await engine.setPaused(until: settings.pausedUntil)
+                    await self.notifier.pauseDeadlineChanged(settings.pausedUntil)
                     Self.applyVerbose(until: settings.verboseLoggingUntil)
+                    if settingsReadable { await self.notifier.retryDegradedStart() }
                 }
 
                 var reloaded: DomainMatcher?
@@ -375,6 +525,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         if let newRouter = self.makeRouter(resolverSettings, source: "recovery") {
                             await engine.setUpstream(newRouter)
                             self.router = newRouter
+                            await self.notifier.resolverStatusChanged(newRouter.status)
                             upstreamName = resolverSettings.useAlternative ? resolverSettings.alternativeName : "Network DNS"
                         }
                         await engine.setLogEnabled(settings.queryLogEnabled)
@@ -389,6 +540,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         let elapsed = Int(Date().timeIntervalSince(startedAt))
                         let rules = await engine.blockedEntryCount
                         Self.log.notice("recovered after \(elapsed) s: \(rules) rules, upstream \(upstreamName)")
+                        await self.notifier.degradedEnded()
                     }
                 }
 

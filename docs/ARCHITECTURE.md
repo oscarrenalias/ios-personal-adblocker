@@ -178,6 +178,65 @@ Control channel: `sendProviderMessage` with JSON-coded `TunnelRequest`
 polls the blocklist generation number every 10 s, so rule updates land even
 if the app is killed before the IPC message.
 
+## Notifications
+
+Status notifications tell the user when protection changes while the app is
+closed. They are off until the user turns them on in Settings, which is also
+when the system permission prompt appears.
+
+**Policy.** `StatusNotificationPolicy.decide(event:state:preferences:now:)`
+(`Shared/StatusNotificationPolicy.swift`) is a pure function: an event, the
+persisted state, the master switch and per-type toggles, and the clock go in;
+actions (`schedule`, `cancel`, `postRestore`), the new state, suppression
+reasons and a debug trace come out. Eight kinds exist: resolver fallback,
+resolver failing, protection stopped, restored, list rejected, list stale,
+pause ended and degraded (built-in rules only). `NotificationPoster` carries
+out the actions and is the only code that touches `UNUserNotificationCenter`.
+
+**Episodes.** Kinds 1, 2, 3 and 7 are problems with an episode
+(`NotificationEpisodeState`: open, scheduled fire time, notified). A repeat
+while an episode is open is ignored. A restore is posted only when the
+problem was actually delivered, and it reuses the problem's identifier so it
+replaces that notification. Switching between fallback and failing ends the
+other episode silently. `stopTunnel` ends pending 1, 2, 6 and 7 silently.
+
+**Debounce through pending triggers.** A problem is not delayed by a timer
+in the tunnel, since the extension can be killed. It is scheduled as a
+`UNTimeIntervalNotificationTrigger` request (30 s for resolver problems,
+60 s for protection stopped, 5 min for degraded). If the problem clears
+first, the pending request is removed and nothing is shown; otherwise the
+system delivers it even if the extension is gone. "Delivered" is inferred
+from the fire time having passed with the request not removed.
+
+**Rate limit.** At most one notification per kind within 5 minutes. A rate
+limited problem still opens its episode, so no restore follows a
+notification the user never saw. Episodes and fire times live in the shared
+`UserDefaults`, so the app and the tunnel see the same state.
+
+**User-off marker.** The app, the Control Center control and the widget set
+`SharedSettings.userTurnedOff` when the user turns protection off, and clear
+it when they turn it on. On a stop, `classifyStop` treats a set marker, or a
+`userInitiated` / `appUpdate` reason, as expected and stays quiet; any other
+stop (including `superceded`, which is another VPN taking over) raises
+"protection stopped".
+
+**Who posts.**
+- The tunnel (`PacketTunnelProvider.StatusNotifier`, an actor so
+  load-decide-save of the shared state never interleaves) handles resolver
+  status changes, unexpected stops, restores, pause deadlines and degraded
+  starts.
+- The app handles blocklist events (rejected, stale) in `FilterListStore`
+  and, as a fallback for a tunnel that died without running `stopTunnel`,
+  the "tunnel gone" check in `ListRefreshScheduler` on background refresh.
+- Taps go to the app's `UNUserNotificationCenterDelegate`
+  (`IBlockerApp.swift`), which routes to Dashboard or Lists using the
+  `tab` field in `userInfo`.
+
+**Privacy.** Content comes from `StatusNotificationContentBuilder` and never
+holds a domain, IP or URL. Only preset resolver names are shown; a custom
+resolver becomes "your custom resolver". Built-in lists show their name;
+custom lists show the name the user typed, or "a custom blocklist".
+
 ## Why the log is a ring file
 
 Bounded disk by construction (no rotation logic inside the memory-limited

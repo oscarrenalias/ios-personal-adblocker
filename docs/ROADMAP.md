@@ -18,7 +18,7 @@ Written 2026-10-25.
 | 4 | [Explain each decision](#explain-each-decision) + [Rule testing](#rule-testing) | 3 (to report "from cache") | L |
 | 5 | [Protection health indicator](#protection-health-indicator) | 0, 1 (status signals) | M |
 | 6 | [Quick controls](#quick-controls) (profiles dropped) | — | S |
-| 7 | [Status notifications](#status-notifications) | resolver status (done); 5 for rules/health signals | M |
+| 7 | [Status notifications](#status-notifications) | resolver status (done); 5 for rules/health signals | ✅ built; on-device acceptance pending |
 
 Why this order:
 - **1 first:** it decides how failures behave, and it's a small addition to a
@@ -183,6 +183,17 @@ Profiles were **dropped** on 2026-10-25 to keep things simple.
   from `spec-c7e3c45d`).
 
 ## Status notifications
+
+**Status:** built (see Notifications in `ARCHITECTURE.md`). Still to confirm
+by hand on a device, since unit tests can't cover them:
+1. Turn notifications on in Settings: the permission prompt appears then.
+2. With the app closed, force a resolver fallback: the notification arrives
+   after about 30 s, and the restore replaces it.
+3. Confirm the packet tunnel extension's pending request is delivered with
+   the app killed.
+4. Turn protection off from the app, Control Center and widget: no
+   notification. Start another VPN: "Ad blocking is off" after about 60 s.
+5. Tap a notification: Dashboard or Lists opens.
 
 **Want:** a notification when protection changes in the background, for
 example when encrypted DNS stops being reachable and lookups go unencrypted,

@@ -136,6 +136,14 @@ public struct SettingsView: View {
                     Text("Downloads EasyList and converts it for Safari's built-in blocker (hides in-page ad leftovers). Enable it in Settings ▸ Apps ▸ Safari ▸ Extensions.")
                 }
 
+                Section {
+                    NavigationLink {
+                        NotificationSettingsView()
+                    } label: {
+                        Label("Notifications", systemImage: "bell.badge")
+                    }
+                }
+
                 Section("Privacy") {
                     Toggle("Keep a query log", isOn: $logEnabled)
                         .onChange(of: logEnabled) { _, value in

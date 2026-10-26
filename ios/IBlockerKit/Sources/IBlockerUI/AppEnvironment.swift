@@ -15,7 +15,13 @@ public enum AppEnvironment {
     }
 
     /// The single shared store; all list mutations and updates go through it.
-    public static let listStore = FilterListStore(paths: paths)
+    public static let listStore = FilterListStore(
+        paths: paths,
+        notifier: NotificationPoster(
+            preferences: { StatusNotificationPreferences(settings: AppEnvironment.settings) }
+        ),
+        settings: settings
+    )
 
     public static var settings: SharedSettings {
         SharedSettings(groupID: groupID) ?? SharedSettings(defaults: .standard)

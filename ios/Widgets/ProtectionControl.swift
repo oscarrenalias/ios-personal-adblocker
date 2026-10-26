@@ -46,6 +46,8 @@ struct ControlProtectionIntent: SetValueIntent {
     func perform() async throws -> some IntentResult {
         let managers = try await NETunnelProviderManager.loadAllFromPreferences()
         guard let manager = managers.first else { return .result() }
+        // Marker is set before the stop so the tunnel classifies it as user-initiated.
+        WidgetEnvironment.settings?.userTurnedOff = !value
         if value {
             manager.isEnabled = true
             manager.isOnDemandEnabled = true

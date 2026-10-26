@@ -66,6 +66,12 @@ public struct SharedSettings: @unchecked Sendable {
         public static let protectionActive = "protectionActive"
         public static let verboseLoggingUntil = "verboseLoggingUntil"
         public static let settingsAvailableSentinel = "settingsAvailableSentinel"
+        public static let notificationsEnabled = "notificationsEnabled"
+        /// Per-type toggles are stored under this prefix + `NotificationType.rawValue`.
+        public static let notificationTypePrefix = "notificationType."
+        public static let userTurnedOff = "userTurnedOff"
+        public static let notificationEpisodes = "notificationEpisodes"
+        public static let notificationFireTimes = "notificationFireTimes"
     }
 
     private let defaults: UserDefaults
@@ -242,5 +248,111 @@ public struct SharedSettings: @unchecked Sendable {
     public var protectionActive: Bool {
         get { defaults.bool(forKey: Keys.protectionActive) }
         nonmutating set { defaults.set(newValue, forKey: Keys.protectionActive) }
+    }
+
+    // MARK: - Status notifications
+
+    /// Master switch for status notifications. Off until the user turns it on.
+    public var notificationsEnabled: Bool {
+        get { defaults.object(forKey: Keys.notificationsEnabled) as? Bool ?? false }
+        nonmutating set { defaults.set(newValue, forKey: Keys.notificationsEnabled) }
+    }
+
+    /// Whether notifications of `type` are wanted (default on). The master
+    /// switch is separate; posters check both.
+    public func isNotificationTypeEnabled(_ type: NotificationType) -> Bool {
+        defaults.object(forKey: Keys.notificationTypePrefix + type.rawValue) as? Bool ?? true
+    }
+
+    public func setNotificationType(_ type: NotificationType, enabled: Bool) {
+        defaults.set(enabled, forKey: Keys.notificationTypePrefix + type.rawValue)
+    }
+
+    /// The user's intent to have protection off, set by every off path before
+    /// it stops the tunnel and cleared by every on path. Deliberately separate
+    /// from `protectionActive`, which mirrors tunnel state and is cleared by
+    /// the tunnel on every stop. Unset by default.
+    public var userTurnedOff: Bool {
+        get { defaults.bool(forKey: Keys.userTurnedOff) }
+        nonmutating set { defaults.set(newValue, forKey: Keys.userTurnedOff) }
+    }
+
+    /// Episode state for a notification kind (`kind` is the kind's stable
+    /// string key). Returns a closed, empty episode when none is stored.
+    public func notificationEpisode(forKind kind: String) -> NotificationEpisodeState {
+        notificationEpisodes[kind] ?? NotificationEpisodeState()
+    }
+
+    public func setNotificationEpisode(_ episode: NotificationEpisodeState, forKind kind: String) {
+        var all = notificationEpisodes
+        all[kind] = episode
+        notificationEpisodes = all
+    }
+
+    /// Fire times recorded for a kind, used for the per-kind rate limit.
+    public func notificationFireTimes(forKind kind: String) -> [Date] {
+        notificationFireTimesByKind[kind] ?? []
+    }
+
+    public func setNotificationFireTimes(_ times: [Date], forKind kind: String) {
+        var all = notificationFireTimesByKind
+        all[kind] = times
+        notificationFireTimesByKind = all
+    }
+
+    private var notificationEpisodes: [String: NotificationEpisodeState] {
+        get {
+            guard let data = defaults.data(forKey: Keys.notificationEpisodes),
+                  let decoded = try? JSONDecoder().decode([String: NotificationEpisodeState].self, from: data)
+            else { return [:] }
+            return decoded
+        }
+        nonmutating set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Keys.notificationEpisodes)
+            }
+        }
+    }
+
+    private var notificationFireTimesByKind: [String: [Date]] {
+        get {
+            guard let data = defaults.data(forKey: Keys.notificationFireTimes),
+                  let decoded = try? JSONDecoder().decode([String: [Date]].self, from: data)
+            else { return [:] }
+            return decoded
+        }
+        nonmutating set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Keys.notificationFireTimes)
+            }
+        }
+    }
+}
+
+/// The four user-facing notification toggles.
+public enum NotificationType: String, CaseIterable, Sendable {
+    /// Encrypted DNS fallback/failure and restores.
+    case dns
+    /// Protection stopped, built-in rules only, and restores.
+    case stopped
+    /// Pause ended.
+    case pause
+    /// Blocklist rejections and staleness.
+    case lists
+}
+
+/// Persisted state of one notification kind's problem episode.
+public struct NotificationEpisodeState: Codable, Sendable, Equatable {
+    /// A problem episode is in progress (no restore has closed it yet).
+    public var isOpen: Bool
+    /// When the pending notification is (or was) scheduled to fire.
+    public var scheduledFireTime: Date?
+    /// The notification was delivered (fire time passed, request not removed).
+    public var notified: Bool
+
+    public init(isOpen: Bool = false, scheduledFireTime: Date? = nil, notified: Bool = false) {
+        self.isOpen = isOpen
+        self.scheduledFireTime = scheduledFireTime
+        self.notified = notified
     }
 }

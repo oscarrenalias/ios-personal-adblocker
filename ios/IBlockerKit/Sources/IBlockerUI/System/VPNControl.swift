@@ -28,6 +28,8 @@ public enum VPNControl {
 
     public static func setEnabled(_ enabled: Bool) async throws {
         guard let manager = try await loadManager() else { throw ControlError.notConfigured }
+        // Marker is set before the stop so the tunnel classifies it as user-initiated.
+        AppEnvironment.settings.userTurnedOff = !enabled
         if enabled {
             manager.isEnabled = true
             manager.isOnDemandEnabled = true
