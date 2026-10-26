@@ -259,6 +259,34 @@ follow-up pass.
 - A pending verbose-logging expiry shortens the next wake to just past the
   expiry. Changing between degraded and idle recomputes the deadline.
 
+### Widget encryption line
+
+The status widget shows whether DNS is encrypted and which resolver answers.
+The widget extension can't ask the tunnel, so the tunnel mirrors the
+router's status into shared `UserDefaults` (`SharedSettings.widgetResolverStatus`,
+JSON-coded `ResolverStatus`).
+
+- **Publish.** `PacketTunnelProvider.publishWidgetStatus` writes the status
+  on tunnel start and on every router status change, including when a new
+  router replaces the old one.
+- **Gate.** `WidgetReloadGate` reduces the status to what the widget shows
+  (`WidgetEncryptionPresentation.State` plus resolver name). The tunnel
+  reloads the widget timeline (`WidgetCenter.reloadTimelines`) only when
+  that pair differs from the last published one, so status churn that
+  doesn't change the visible line costs no reload. The write, gate decision
+  and reload run under one lock so concurrent publishes can't interleave.
+- **Start and stop.** Start reloads unconditionally after publishing. Stop
+  clears the value, resets the gate and reloads unconditionally.
+- **Read.** `StatusWidget.makeEntry` reads the mirror together with
+  `protectionActive` and `pausedUntil` and builds a
+  `WidgetEncryptionPresentation` for the layouts.
+- **Known limitation: stale state.** The mirror is cleared only by
+  `stopTunnel`. If the tunnel dies without running it (crash, jetsam),
+  the last value stays in the shared defaults and the widget can keep
+  showing it. `TunnelController.syncStatus` is the backstop: when the app
+  sees the VPN as `disconnected` or `invalid` it clears the value and reloads
+  the widgets. Until the app runs and observes that, the line can be stale.
+
 ## Notifications
 
 Status notifications tell the user when protection changes while the app is
