@@ -98,6 +98,18 @@ public struct SettingsView: View {
                 }
 
                 Section {
+                    LabeledContent("Cache", value: CacheRowPresentation(
+                        tunnelConnected: tunnel.state == .connected,
+                        stats: tunnel.runtimeStats).text)
+                    Button("Clear DNS cache") {
+                        Task { await tunnel.clearDNSCache() }
+                    }
+                    .disabled(tunnel.state != .connected)
+                } footer: {
+                    Text("Clears the ad blocker's cache. iOS keeps its own short-lived cache.")
+                }
+
+                Section {
                     NavigationLink {
                         ProfileExportView()
                     } label: {

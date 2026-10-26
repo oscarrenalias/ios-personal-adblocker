@@ -206,6 +206,21 @@ public final class TunnelController {
         _ = await send(.setResolverSettings(settings))
     }
 
+    /// Drops the tunnel's cached DNS answers, then refreshes the stats row.
+    /// A tunnel that predates the cache never replies, so the row falls back
+    /// to "Not available".
+    public func clearDNSCache() async {
+        switch await send(.clearDNSCache) {
+        case .ok?:
+            Self.log.notice("clearDNSCache requested")
+        case .failure(let message)?:
+            Self.log.error("clearDNSCache failed: \(message)")
+        case .stats?, nil:
+            Self.log.error("clearDNSCache failed: no reply (older tunnel?)")
+        }
+        await refreshStats()
+    }
+
     // MARK: - Pause
 
     public var pausedUntil: Date? { runtimeStats?.pausedUntil }

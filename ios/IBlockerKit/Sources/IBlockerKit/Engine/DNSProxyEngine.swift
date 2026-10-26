@@ -15,7 +15,7 @@ public actor DNSProxyEngine {
         public var mtu: Int
         public var logEnabled: Bool
 
-        public init(blockTTL: UInt32 = 300, maxInFlight: Int = 256, mtu: Int = TunnelConstants.mtu,
+        public init(blockTTL: UInt32 = 10, maxInFlight: Int = 256, mtu: Int = TunnelConstants.mtu,
                     logEnabled: Bool = true) {
             self.blockTTL = blockTTL
             self.maxInFlight = maxInFlight
@@ -32,8 +32,11 @@ public actor DNSProxyEngine {
     private let statsURL: URL?
     private var configuration: Configuration
     private var stats: BlockerStats
+    /// Last stats value persisted (or loaded); flush skips the write when unchanged.
+    private var lastWrittenStats: BlockerStats
     private let startedAt = Date()
     private var inFlight = 0
+    private var cache: DNSCache
     /// While set to a future instant, blocking is suspended and every query
     /// is forwarded (a temporary "let everything through").
     private var pausedUntil: Date?
@@ -42,13 +45,17 @@ public actor DNSProxyEngine {
                 upstream: DNSUpstream,
                 logWriter: QueryLogRingWriter?,
                 statsURL: URL?,
-                configuration: Configuration = Configuration()) {
+                configuration: Configuration = Configuration(),
+                cache: DNSCache = DNSCache()) {
+        self.cache = cache
         self.matcher = matcher
         self.upstream = upstream
         self.logWriter = logWriter
         self.statsURL = statsURL
         self.configuration = configuration
-        self.stats = statsURL.map { StatsPersistence.load(from: $0) } ?? BlockerStats()
+        let loaded = statsURL.map { StatsPersistence.load(from: $0) } ?? BlockerStats()
+        self.stats = loaded
+        self.lastWrittenStats = loaded
     }
 
     // MARK: - Packet path
@@ -74,6 +81,18 @@ public actor DNSProxyEngine {
             return packets(for: udp, payload: [UInt8](response))
         }
 
+        cache.maintain()
+        if case .hit(let cached) = cache.lookup(query: query),
+           cached.count <= UDPReplyBuilder.maxPayload(ipVersion: udp.ipVersion) {
+            // Served outside `forward`, so hits never count toward inFlight.
+            record(name: query.questionName, qtype: query.qtype, verdict: .allowed)
+            let result = packets(for: udp, payload: [UInt8](cached))
+            if result.count > 1 {
+                Self.log.debug("query \(query.questionName): fragmented cached reply, answer \(cached.count) bytes, \(result.count) fragments")
+            }
+            return result
+        }
+
         return await forward(raw: query.raw, query: query, udp: udp)
     }
 
@@ -93,12 +112,18 @@ public actor DNSProxyEngine {
         defer { inFlight -= 1 }
 
         let started = Date()
+        let cacheGeneration = cache.generation
         do {
             let answer = try await upstream.resolve(raw)
             let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
             if let query {
                 Self.log.debug("query \(query.questionName) qtype \(query.qtype): allowed in \(elapsedMs) ms")
                 record(name: query.questionName, qtype: query.qtype, verdict: .allowed)
+                if cache.generation == cacheGeneration {
+                    cache.store(query: query, response: answer)
+                } else if DNSCache.bypassReason(for: query) == nil {
+                    Self.log.debug("not cached \(query.questionName) \(DNSRecordType.name(query.qtype)): cache cleared while in flight")
+                }
             }
             if answer.count > UDPReplyBuilder.maxPayload(ipVersion: udp.ipVersion) {
                 if let query {
@@ -154,6 +179,13 @@ public actor DNSProxyEngine {
     public func setUpstream(_ upstream: DNSUpstream) {
         self.upstream = upstream
         Self.log.info("upstream switched")
+        clearCache(reason: .resolverChange)
+    }
+
+    /// Drops every cached answer; in-flight lookups started before this call won't be stored.
+    @discardableResult
+    public func clearCache(reason: DNSCache.ClearReason) -> Int {
+        cache.clear(reason: reason)
     }
 
     /// Suspends blocking until `date` (nil resumes immediately).
@@ -185,7 +217,10 @@ public actor DNSProxyEngine {
             blockedQueries: stats.totalBlocked,
             blocklistEntryCount: UInt64(matcher.blockedEntryCount),
             memoryBytes: memoryBytes,
-            pausedUntil: isPaused ? pausedUntil : nil
+            pausedUntil: isPaused ? pausedUntil : nil,
+            cacheEntries: UInt64(cache.entryCount),
+            cacheHits: cache.counters.hits,
+            cacheMisses: cache.counters.misses
         )
     }
 
@@ -193,8 +228,9 @@ public actor DNSProxyEngine {
     /// the provider, before stats snapshots, and at tunnel shutdown.
     public func flush() {
         try? logWriter?.flush()
-        if let statsURL {
+        if let statsURL, stats != lastWrittenStats {
             StatsPersistence.save(stats, to: statsURL)
+            lastWrittenStats = stats
         }
     }
 }

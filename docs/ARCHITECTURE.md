@@ -120,6 +120,28 @@ is replaced in memory by the Quad9 preset config and name (nothing is written
 back; other URLs are untouched) and logged once per process. At boot, until
 settings are readable, the router runs with defaults and is rebuilt on recovery.
 
+## DNS cache
+
+`DNSProxyEngine` owns a `DNSCache` (an actor-confined struct, not
+thread-safe). Order for each query: blocked names are answered first (with
+`blockTTL`, 10 s), then the cache, then the resolver. Blocked answers are never
+cached, so rule and pause changes apply immediately to blocked lookups.
+
+- **Key:** the question (name lowercased, type, class) plus whether the query
+  carried EDNS. Only IN queries qualify; CD and the DO bit bypass the cache.
+- **TTL:** the lowest record TTL in the answer, capped at 3600 s. Negative
+  answers use the SOA minimum, capped at 300 s. TTL 0 isn't stored.
+- **Hits:** the stored response is rewritten for the new query (ID, exact question
+  case, RD bit) and record TTLs count down with the entry's age (minimum 1).
+- **Limits:** 2,000 entries and 1 MB, with LRU eviction; expired entries are
+  purged every 60 s.
+- **Clearing:** on resolver change, resolver status change, network change,
+  and the user's "Clear DNS cache" action (IPC `clearDNSCache`).
+  Each clear bumps a generation counter, so a lookup that started before the
+  clear isn't stored when it returns.
+- **Stats:** entry count, hits and misses go into the tunnel stats for the
+  Settings cache row.
+
 ## List update pipeline
 
 `FilterListStore` (`IBlockerKit/Lists`) is an actor and the only owner of
@@ -174,7 +196,7 @@ Everything shared lives in the App Group container:
 | shared `UserDefaults` | app | tunnel (resolver settings, log toggle) |
 
 Control channel: `sendProviderMessage` with JSON-coded `TunnelRequest`
-(`reloadRules`, `getStats`, `setResolverSettings`, `ping`). Fallback: the tunnel
+(`reloadRules`, `getStats`, `setResolverSettings`, `clearDNSCache`, `ping`). Fallback: the tunnel
 polls the blocklist generation number every 10 s, so rule updates land even
 if the app is killed before the IPC message.
 

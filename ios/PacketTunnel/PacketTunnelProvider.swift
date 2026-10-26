@@ -14,7 +14,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private static let log = Log(category: "tunnel")
     private static let pathLog = Log(category: "path")
 
-    private var engine: DNSProxyEngine?
+    /// Read from router status callbacks and the path monitor queue, written
+    /// on start / stop, so it lives behind a lock.
+    private let engineBox = LockedBox<DNSProxyEngine?>(nil)
+    private var engine: DNSProxyEngine? {
+        get { engineBox.withValue { $0 } }
+        set { engineBox.withValue { $0 = newValue } }
+    }
     /// Read from the path monitor queue (networkChanged) and written on
     /// start / IPC / recovery, so it lives behind a lock.
     private let routerBox = LockedBox<ResolverRouter?>(nil)
@@ -248,6 +254,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             alternative = (upstream, settings.alternativeName, settings.alternative.isEncrypted)
         }
         let notifier = notifier
+        let engineBox = engineBox
         let generation = routerGeneration.withValue { $0 += 1; return $0 }
         let generationBox = routerGeneration
         let notifyLog = Log(category: "notify")
@@ -260,6 +267,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 guard generationBox.withValue({ $0 }) == generation else {
                     notifyLog.info("ignored status change from replaced router")
                     return
+                }
+                if let engine = engineBox.withValue({ $0 }) {
+                    Task { await engine.clearCache(reason: .resolverStatusChange) }
                 }
                 Task { await notifier.resolverStatusChanged(status) }
             }
@@ -274,6 +284,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         pathMonitor?.cancel()
         let box = physicalInterface
         let routerBox = routerBox
+        let engineBox = engineBox
         let monitor = NWPathMonitor()
         // Only touched from the path monitor queue.
         var previous: String = "none"
@@ -289,6 +300,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 // Only a selected-interface change resets the router's
                 // network-DNS state (circuit breaker / probe).
                 routerBox.withValue { $0 }?.networkChanged()
+                if let engine = engineBox.withValue({ $0 }) {
+                    Task { await engine.clearCache(reason: .networkChange) }
+                }
             }
             if selected == nil {
                 let types = path.availableInterfaces.map { String(describing: $0.type) }.joined(separator: ", ")
@@ -469,6 +483,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             await engine.setPaused(until: until)
             await notifier.pauseDeadlineChanged(until)
+            response = .ok
+
+        case .clearDNSCache:
+            Self.log.info("IPC clearDNSCache")
+            await engine.clearCache(reason: .user)
             response = .ok
         }
         return try? TunnelIPCCoder.encode(response)
