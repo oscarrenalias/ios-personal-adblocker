@@ -336,6 +336,7 @@ public struct DNSCache: Sendable {
     }
 
     /// Drops every entry, bumps the generation and logs at notice.
+    /// A `.user` clear also resets the hit/miss/eviction counters.
     /// Returns the number of entries dropped.
     @discardableResult
     public mutating func clear(reason: ClearReason) -> Int {
@@ -343,7 +344,14 @@ public struct DNSCache: Sendable {
         slots.removeAll()
         totalBytes = 0
         generation &+= 1
-        Self.log.notice("cache cleared (\(reason.rawValue)): \(dropped) entries")
+        if reason == .user {
+            // Reset the baseline too, otherwise maintain()'s UInt64 deltas underflow.
+            counters = Counters()
+            summaryBaseline = counters
+            Self.log.notice("cache cleared (\(reason.rawValue)): \(dropped) entries, counters reset")
+        } else {
+            Self.log.notice("cache cleared (\(reason.rawValue)): \(dropped) entries")
+        }
         return dropped
     }
 

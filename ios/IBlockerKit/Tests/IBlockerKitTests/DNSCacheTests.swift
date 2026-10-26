@@ -546,6 +546,43 @@ final class DNSCacheTests: XCTestCase {
         XCTAssertEqual(cache.counters.hits, 2)
         XCTAssertEqual(cache.counters.misses, 1)
     }
+
+    private func seedHitAndMiss(_ cache: inout DNSCache) throws {
+        let q = query("example.com")
+        _ = cache.lookup(query: try parsed(q))
+        cache.store(query: try parsed(q), response: Data(try makeResponse(for: q, answers: [.a(ttl: 60)])))
+        _ = cache.lookup(query: try parsed(q))
+    }
+
+    func testUserClearResetsCounters() throws {
+        var cache = makeCache()
+        try seedHitAndMiss(&cache)
+        XCTAssertEqual(cache.counters.hits, 1)
+        XCTAssertEqual(cache.counters.misses, 1)
+        cache.clear(reason: .user)
+        XCTAssertEqual(cache.counters.hits, 0)
+        XCTAssertEqual(cache.counters.misses, 0)
+    }
+
+    func testNonUserClearKeepsCounters() throws {
+        var cache = makeCache()
+        try seedHitAndMiss(&cache)
+        cache.clear(reason: .networkChange)
+        XCTAssertEqual(cache.counters.hits, 1)
+        XCTAssertEqual(cache.counters.misses, 1)
+    }
+
+    func testMaintainAfterUserClearDoesNotUnderflow() throws {
+        var cache = makeCache()
+        try seedHitAndMiss(&cache)
+        clock.advance(DNSCache.summaryInterval + 1)
+        cache.maintain() // baseline now holds the pre-clear counters
+        try seedHitAndMiss(&cache)
+        cache.clear(reason: .user)
+        clock.advance(DNSCache.summaryInterval + 1)
+        cache.maintain() // would trap on UInt64 underflow without the baseline reset
+        XCTAssertEqual(cache.counters.hits, 0)
+    }
 }
 
 // MARK: - Engine tests
@@ -718,6 +755,22 @@ final class DNSProxyEngineCacheTests: XCTestCase {
         XCTAssertEqual(dropped, 2)
         _ = await send(engine, "a.example.com")
         XCTAssertEqual(upstream.calls, 3)
+    }
+
+    func testUserClearCacheResetsStatsSnapshotCounters() async throws {
+        let upstream = CountingUpstream { try await answerA($0) }
+        let engine = try makeEngine(upstream: upstream)
+        _ = await send(engine, "example.com")
+        _ = await send(engine, "example.com", id: 2)
+        var snapshot = await engine.statsSnapshot()
+        XCTAssertEqual(snapshot.cacheHits, 1)
+        XCTAssertEqual(snapshot.cacheMisses, 1)
+
+        _ = await engine.clearCache(reason: .user)
+        snapshot = await engine.statsSnapshot()
+        XCTAssertEqual(snapshot.cacheEntries, 0)
+        XCTAssertEqual(snapshot.cacheHits, 0)
+        XCTAssertEqual(snapshot.cacheMisses, 0)
     }
 
     func testLateAnswerIsNotCachedAfterClearCache() async throws {
