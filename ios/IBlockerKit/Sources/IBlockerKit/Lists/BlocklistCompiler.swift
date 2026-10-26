@@ -26,6 +26,8 @@ public enum BlocklistCompiler {
         var blockHashes = Set<UInt64>()
         var listAllowHashes = Set<UInt64>()
 
+        allocateSourceNumbers(state: &state)
+
         // A hidden source must not keep filtering from behind the curtain: a
         // relay list enabled before the UI was hidden is skipped, not compiled.
         for source in state.sources where source.enabled && !FeatureFlags.isHidden(sourceID: source.id) {
@@ -79,6 +81,36 @@ public enum BlocklistCompiler {
         stats.userDenyEntryCount = userDenyHashes.count
         stats.generation = generation
         return stats
+    }
+
+    /// Highest source number that can be allocated; 0 means "unknown".
+    static let maxSourceNumber: UInt8 = 250
+
+    private static let log = Log(category: "lists")
+
+    /// Gives every source a stable number in 1...250. Entries are never
+    /// pruned, so the number of a removed source stays reserved and is never
+    /// handed to another source. When the range is exhausted the source is
+    /// recorded as 0 (unknown) and keeps that value.
+    static func allocateSourceNumbers(state: inout FilterListState) {
+        var numbers = state.sourceNumbers ?? [:]
+        var used = Set(numbers.values)
+        used.remove(0)
+        var next: UInt8 = 1
+        var changed = state.sourceNumbers == nil
+
+        for source in state.sources where numbers[source.id] == nil {
+            while next <= maxSourceNumber, used.contains(next) { next += 1 }
+            if next <= maxSourceNumber {
+                numbers[source.id] = next
+                used.insert(next)
+            } else {
+                numbers[source.id] = 0
+                log.error("source numbers exhausted, \(source.id) recorded as unknown")
+            }
+            changed = true
+        }
+        if changed { state.sourceNumbers = numbers }
     }
 
     private static func normalizeToHashes(_ domains: [String]) -> Set<UInt64> {
