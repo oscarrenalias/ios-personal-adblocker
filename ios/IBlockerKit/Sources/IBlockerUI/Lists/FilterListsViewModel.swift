@@ -172,7 +172,12 @@ public final class FilterListsViewModel {
     /// ships new seed rules but the old blob keeps serving the tunnel.
     public func ensureFreshCompile() async {
         let blobMissing = !FileManager.default.fileExists(atPath: paths.blocklistURL.path)
-        if blobMissing || state.compiledSeedVersion != SeedRules.version {
+        let formatMismatch = state.compiledFormatVersion != CompiledBlocklist.formatVersion
+        if formatMismatch {
+            let old = state.compiledFormatVersion.map(String.init) ?? "none"
+            log.notice("recompiling: compiled format \(old) → \(CompiledBlocklist.formatVersion)")
+        }
+        if blobMissing || formatMismatch || state.compiledSeedVersion != SeedRules.version {
             await compileOnly()
         }
     }

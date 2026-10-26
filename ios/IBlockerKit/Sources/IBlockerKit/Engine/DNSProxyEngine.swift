@@ -58,6 +58,68 @@ public actor DNSProxyEngine {
         self.lastWrittenStats = loaded
     }
 
+    // MARK: - Decision attribution
+
+    /// Why a query got its verdict, as recorded in the log details. Holds no
+    /// strings of its own: the debug description is built only when read.
+    private struct Decision {
+        var source: UInt8
+        var sourceNumber: UInt8 = 0
+        var matchedLabels: UInt8 = 0
+        private var match: DomainMatcher.MatchSource?
+        private var domain: String = ""
+
+        static let none = Decision(source: 1)
+        static let paused = Decision(source: 7)
+
+        private init(source: UInt8) {
+            self.source = source
+        }
+
+        init(_ hit: DomainMatcher.Hit, domain: String) {
+            var number: UInt8 = 0
+            let code: UInt8
+            switch hit.source {
+            case .userAllowlist: code = 2
+            case .userDenylist: code = 3
+            case .builtIn: code = 4
+            case .listException(let n): code = 5; number = n
+            case .list(let n): code = 6; number = n
+            }
+            self.source = code
+            self.sourceNumber = number
+            self.matchedLabels = UInt8(clamping: hit.matchedLabelCount)
+            self.match = hit.source
+            self.domain = domain
+        }
+
+        /// Debug-log form: `source=<kind>[#n] suffix=<matched>`.
+        var description: String {
+            guard let match else { return source == 7 ? "source=paused" : "source=none" }
+            let kind: String
+            switch match {
+            case .userAllowlist: kind = "userAllow"
+            case .userDenylist: kind = "userDeny"
+            case .builtIn: kind = "builtIn"
+            case .listException(let n): kind = "listException#\(n)"
+            case .list(let n): kind = "list#\(n)"
+            }
+            let suffix = domain.split(separator: ".", omittingEmptySubsequences: false)
+                .suffix(Int(matchedLabels)).joined(separator: ".")
+            return "source=\(kind) suffix=\(suffix)"
+        }
+    }
+
+    private static func logRoute(_ route: UpstreamRoute) -> LogRoute {
+        switch route {
+        case .alternative: return .alternative
+        case .network: return .network
+        case .networkOnlyName: return .networkOnlyName
+        case .fallback: return .fallback
+        case .local: return .local
+        }
+    }
+
     // MARK: - Packet path
 
     public func handlePacket(_ packet: Data) async -> [Data] {
@@ -71,21 +133,33 @@ public actor DNSProxyEngine {
             query = try DNSParser.parseQuery(message)
         } catch {
             // Responses, multi-question or exotic messages: forward untouched.
-            return await forward(raw: message, query: nil, udp: udp)
+            return await forward(raw: message, query: nil, udp: udp, decision: .none)
         }
 
-        if !isPaused, query.qclass == 1, matcher.verdict(for: query.questionName) == .block {
-            Self.log.debug("query \(query.questionName) qtype \(query.qtype): blocked")
-            record(name: query.questionName, qtype: query.qtype, verdict: .blocked)
-            let response = DNSResponseBuilder.blocked(for: query, ttl: configuration.blockTTL)
-            return packets(for: udp, payload: [UInt8](response))
+        var decision = Decision.none
+        if isPaused {
+            decision = .paused
+        } else if query.qclass == 1 {
+            let hit = matcher.hit(for: query.questionName)
+            if let hit {
+                decision = Decision(hit, domain: query.questionName)
+            }
+            if hit?.verdict == .block {
+                Self.log.debug("query \(query.questionName) qtype \(query.qtype): blocked \(decision.description)")
+                record(name: query.questionName, qtype: query.qtype, verdict: .blocked,
+                       decision: decision, cacheHit: false, route: .unknown)
+                let response = DNSResponseBuilder.blocked(for: query, ttl: configuration.blockTTL)
+                return packets(for: udp, payload: [UInt8](response))
+            }
         }
 
         cache.maintain()
         if case .hit(let cached) = cache.lookup(query: query),
            cached.count <= UDPReplyBuilder.maxPayload(ipVersion: udp.ipVersion) {
             // Served outside `forward`, so hits never count toward inFlight.
-            record(name: query.questionName, qtype: query.qtype, verdict: .allowed)
+            Self.log.debug("query \(query.questionName) qtype \(query.qtype): allowed \(decision.description) route=unknown cache=true")
+            record(name: query.questionName, qtype: query.qtype, verdict: .allowed,
+                   decision: decision, cacheHit: true, route: .unknown)
             let result = packets(for: udp, payload: [UInt8](cached))
             if result.count > 1 {
                 Self.log.debug("query \(query.questionName): fragmented cached reply, answer \(cached.count) bytes, \(result.count) fragments")
@@ -93,14 +167,15 @@ public actor DNSProxyEngine {
             return result
         }
 
-        return await forward(raw: query.raw, query: query, udp: udp)
+        return await forward(raw: query.raw, query: query, udp: udp, decision: decision)
     }
 
-    private func forward(raw: Data, query: DNSQuery?, udp: ParsedUDPPacket) async -> [Data] {
+    private func forward(raw: Data, query: DNSQuery?, udp: ParsedUDPPacket, decision: Decision) async -> [Data] {
         guard inFlight < configuration.maxInFlight else {
             if let query {
-                Self.log.debug("query \(query.questionName) qtype \(query.qtype): failed (in-flight limit \(configuration.maxInFlight) reached)")
-                record(name: query.questionName, qtype: query.qtype, verdict: .failed)
+                Self.log.debug("query \(query.questionName) qtype \(query.qtype): failed \(decision.description) route=unknown cache=false (in-flight limit \(configuration.maxInFlight) reached)")
+                record(name: query.questionName, qtype: query.qtype, verdict: .failed,
+                       decision: decision, cacheHit: false, route: .unknown)
                 let servfail = DNSResponseBuilder.servfail(for: query)
                 return packets(for: udp, payload: [UInt8](servfail))
             }
@@ -114,11 +189,12 @@ public actor DNSProxyEngine {
         let started = Date()
         let cacheGeneration = cache.generation
         do {
-            let answer = try await upstream.resolve(raw)
+            let (answer, upstreamRoute) = try await upstream.resolveWithRoute(raw)
             let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
             if let query {
-                Self.log.debug("query \(query.questionName) qtype \(query.qtype): allowed in \(elapsedMs) ms")
-                record(name: query.questionName, qtype: query.qtype, verdict: .allowed)
+                Self.log.debug("query \(query.questionName) qtype \(query.qtype): allowed \(decision.description) route=\(upstreamRoute) cache=false in \(elapsedMs) ms")
+                record(name: query.questionName, qtype: query.qtype, verdict: .allowed,
+                       decision: decision, cacheHit: false, route: Self.logRoute(upstreamRoute))
                 if cache.generation == cacheGeneration {
                     cache.store(query: query, response: answer)
                 } else if DNSCache.bypassReason(for: query) == nil {
@@ -142,8 +218,11 @@ public actor DNSProxyEngine {
         } catch {
             let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
             if let query {
-                Self.log.debug("query \(query.questionName) qtype \(query.qtype): failed in \(elapsedMs) ms, returning SERVFAIL: \(error)")
-                record(name: query.questionName, qtype: query.qtype, verdict: .failed)
+                let failedRoute = (error as? RoutedError)?.route
+                Self.log.debug("query \(query.questionName) qtype \(query.qtype): failed \(decision.description) route=\(failedRoute.map { "\($0)" } ?? "unknown") cache=false in \(elapsedMs) ms, returning SERVFAIL: \(error)")
+                record(name: query.questionName, qtype: query.qtype, verdict: .failed,
+                       decision: decision, cacheHit: false,
+                       route: failedRoute.map(Self.logRoute) ?? .unknown)
                 let servfail = DNSResponseBuilder.servfail(for: query)
                 return packets(for: udp, payload: [UInt8](servfail))
             }
@@ -156,7 +235,8 @@ public actor DNSProxyEngine {
         UDPReplyBuilder.replyPackets(to: udp, payload: payload, mtu: configuration.mtu)
     }
 
-    private func record(name: String, qtype: UInt16, verdict: LogVerdict) {
+    private func record(name: String, qtype: UInt16, verdict: LogVerdict,
+                        decision: Decision, cacheHit: Bool, route: LogRoute) {
         let now = Date()
         stats.record(blocked: verdict == .blocked, on: BlockerStats.dayKey(for: now))
         if configuration.logEnabled, let writer = logWriter {
@@ -164,7 +244,11 @@ public actor DNSProxyEngine {
                 timestampMillis: UInt64(now.timeIntervalSince1970 * 1000),
                 qtype: qtype,
                 verdict: verdict,
-                domain: name
+                listId: decision.source,
+                domain: name,
+                details: QueryLogDetails(cacheHit: cacheHit, route: route,
+                                         sourceNumber: decision.sourceNumber,
+                                         matchedLabels: decision.matchedLabels)
             ))
         }
     }

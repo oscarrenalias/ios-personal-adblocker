@@ -25,6 +25,7 @@ public struct AppGroupPaths: Sendable {
     }
 
     public var blocklistURL: URL { containerURL.appendingPathComponent("blocklist.bin") }
+    public var listAllowlistURL: URL { containerURL.appendingPathComponent("listallow.bin") }
     public var userAllowlistURL: URL { containerURL.appendingPathComponent("allowlist.bin") }
     public var userDenylistURL: URL { containerURL.appendingPathComponent("denylist.bin") }
     public var queryLogURL: URL { containerURL.appendingPathComponent("querylog.ring") }
@@ -69,7 +70,8 @@ public struct AppGroupPaths: Sendable {
             blocklist: loadBlob(blocklistURL, failures: &failures),
             userAllowlist: loadBlob(userAllowlistURL, failures: &failures),
             userDenylist: loadBlob(userDenylistURL, failures: &failures),
-            builtInBlockHashes: builtInBlockHashes
+            builtInBlockHashes: builtInBlockHashes,
+            listAllowlist: loadBlob(listAllowlistURL, failures: &failures)
         )
         return (matcher, failures)
     }
@@ -87,7 +89,7 @@ public struct AppGroupPaths: Sendable {
     @discardableResult
     public func relaxBlobProtection() -> [BlobLoadFailure] {
         var failures: [BlobLoadFailure] = []
-        for url in [blocklistURL, userAllowlistURL, userDenylistURL]
+        for url in [blocklistURL, listAllowlistURL, userAllowlistURL, userDenylistURL]
         where FileManager.default.fileExists(atPath: url.path) {
             do {
                 try FileManager.default.setAttributes([.protectionKey: FileProtectionType.none],

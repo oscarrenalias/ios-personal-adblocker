@@ -516,7 +516,19 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 Self.log.error("blocklist load failed: \(failure.fileName), error: \(failure.error)")
             }
         }
+        if let blocklist = result.matcher.blocklist, blocklist.formatVersion == CompiledBlocklist.legacyFormatVersion {
+            Self.log.notice("blocklist v1 loaded (no attribution); waiting for recompile")
+        }
         return result
+    }
+
+    /// A list exceptions blob is only usable alongside the blocklist it was
+    /// compiled with. A missing exceptions blob is accepted (no exceptions).
+    /// Returns the generations when they disagree, nil when the pair is usable.
+    static func exceptionsGenerationMismatch(for matcher: DomainMatcher) -> (exceptions: UInt32, blocklist: UInt32)? {
+        guard let exceptions = matcher.listAllowlist, let blocklist = matcher.blocklist,
+              exceptions.generation != blocklist.generation else { return nil }
+        return (exceptions.generation, blocklist.generation)
     }
 
     // MARK: - Packet loop
@@ -696,8 +708,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         let onDisk = try CompiledBlocklistView(contentsOf: paths.blocklistURL)
                         if onDisk.generation != current {
                             let matcher = self.currentMatcher(paths: paths).matcher
-                            await engine.reload(matcher: matcher)
-                            Self.log.info("blocklist reloaded: \(matcher.blockedEntryCount) rules, generation \(onDisk.generation)\(signalTriggered ? " (signal)" : "")")
+                            if let mismatch = Self.exceptionsGenerationMismatch(for: matcher) {
+                                Self.log.notice("list exceptions generation \(mismatch.exceptions) ≠ blocklist \(mismatch.blocklist), deferring reload")
+                            } else {
+                                await engine.reload(matcher: matcher)
+                                Self.log.info("blocklist reloaded: \(matcher.blockedEntryCount) rules, generation \(onDisk.generation)\(signalTriggered ? " (signal)" : "")")
+                            }
                         }
                     } catch {
                         // A missing file is normal before the first compile.

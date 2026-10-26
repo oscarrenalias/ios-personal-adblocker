@@ -173,14 +173,55 @@ Everything logs under category `lists`.
 ## Memory (the 50 MB extension budget)
 
 The compiled blocklist is a flat file: 32-byte header + sorted `u64`
-FNV-1a hashes of every domain. The tunnel maps it read-only
+FNV-1a hashes of every domain (plus one source byte per hash in v2, see
+below). The tunnel maps it read-only
 (`Data(contentsOf:options:.alwaysMapped)`) and binary-searches the mapped
 pages. 800k domains ≈ 6.4 MB of *file*, of which only touched pages are
 resident — the extension idles around a few MB.
 
 Matching walks the query name's suffixes (`a.b.c.com` → `a.b.c.com`,
-`b.c.com`, `c.com`) and probes user-allow → user-deny → blocklist, so an
+`b.c.com`, `c.com`) and probes the sets in precedence order (below), so an
 entry blocks its whole subtree and a user allow always wins.
+
+### Compiled blobs and precedence
+
+Format (`CompiledBlocklist`): magic `IBK1`, version, entry count, generation,
+then sorted hashes. **v1** (`allowlist.bin`, `denylist.bin`) is hashes only.
+**v2** (`blocklist.bin`, `listallow.bin`) appends one `u8` source number per
+hash, in hash order. If a hash is in several lists, the first source wins.
+`CompiledBlocklistView` reads both versions and can return the source number
+for a hash.
+
+Source numbers (1–250) identify list sources. They're allocated by the
+compiler, kept stable in `FilterListState.sourceNumbers` (`sources.json`), and
+resolved to list names in the app. 0 means unknown (for example, numbers
+exhausted). `FilterListState.compiledFormatVersion` records the format last
+compiled; when it differs from the current one, the app recompiles. Until the
+tunnel sees a v2 blocklist with a matching `listallow.bin` generation it
+defers the reload; a v1 blocklist is loaded without attribution.
+
+`DomainMatcher` precedence, highest first:
+
+1. user allowlist
+2. user denylist
+3. built-in rules
+4. list exceptions (`@@`, `listallow.bin`), matched at any suffix; they
+   override list blocks but not the user or built-in sets
+5. compiled blocklist
+
+`DomainMatcher.explain` returns the verdict, the deciding set and the number
+of labels of the matching suffix (the rule text is rebuilt from the query);
+`allMatches` lists every hit in every set, used by "Test a domain".
+
+### Decision explanations
+
+Each query log record (64 bytes) keeps the verdict, a decision source byte
+(none, user allow, user deny, built-in, list exception, list, paused) and,
+when flag bit 7 is set, v2 details: cache hit, route (alternative, network,
+network-only name, fallback, local), source number and matched label count.
+Older records without details still decode. The query log detail sheet and
+the "Test a domain" screen (Lists) present these through
+`DecisionExplanationPresentation`; no domain strings are added to the blobs.
 
 ## Data flow between app and tunnel
 
@@ -188,7 +229,7 @@ Everything shared lives in the App Group container:
 
 | File | Writer | Reader |
 |---|---|---|
-| `blocklist.bin`, `allowlist.bin`, `denylist.bin` | app (compiler) | tunnel (mmap) |
+| `blocklist.bin`, `listallow.bin`, `allowlist.bin`, `denylist.bin` | app (compiler) | tunnel (mmap) |
 | `querylog.ring` (4 MB fixed ring, 64 B records) | tunnel | app (1 Hz tail while a log or chart view is visible) |
 | `stats.json` | tunnel (flushed on each maintenance timer pass: 60 s idle, 2 s degraded) | app (fallback when tunnel unreachable) |
 | `sources.json` | app (via `FilterListStore`) | app |

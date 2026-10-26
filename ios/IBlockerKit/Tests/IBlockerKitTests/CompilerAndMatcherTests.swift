@@ -37,13 +37,14 @@ final class CompilerAndMatcherTests: XCTestCase {
 
         let stats = try BlocklistCompiler.compile(state: &state, paths: paths)
         XCTAssertEqual(stats.generation, 1)
-        // ads.example.com, doubleclick.net, tracker.io (okay.example.com subtracted by @@)
-        XCTAssertEqual(stats.blockedEntryCount, 3)
+        // ads.example.com, doubleclick.net, tracker.io, okay.example.com (@@ is applied at lookup, not subtracted)
+        XCTAssertEqual(stats.blockedEntryCount, 4)
+        XCTAssertEqual(stats.listAllowEntryCount, 1)
         XCTAssertEqual(stats.userAllowEntryCount, 1)
         XCTAssertEqual(stats.userDenyEntryCount, 1)
 
         let matcher = paths.loadMatcher()
-        XCTAssertEqual(matcher.blockedEntryCount, 3)
+        XCTAssertEqual(matcher.blockedEntryCount, 4)
 
         // Exact and subdomain blocking.
         XCTAssertEqual(matcher.verdict(for: "ads.example.com"), .block)
@@ -52,8 +53,8 @@ final class CompilerAndMatcherTests: XCTestCase {
         XCTAssertEqual(matcher.verdict(for: "x.y.doubleclick.net"), .block)
         XCTAssertEqual(matcher.verdict(for: "tracker.io"), .block)
 
-        // List-level @@ subtraction.
-        XCTAssertEqual(matcher.verdict(for: "okay.example.com"), .none)
+        // List-level @@ exceptions override the list block at lookup time.
+        XCTAssertEqual(matcher.verdict(for: "okay.example.com"), .allow)
 
         // Disabled source not compiled.
         XCTAssertEqual(matcher.verdict(for: "disabled.example.com"), .none)

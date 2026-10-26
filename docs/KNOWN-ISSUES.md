@@ -18,7 +18,7 @@ worth knowing.
 3. [ ] [KI-3](#ki-3-apple-relay-handling-is-switched-off-docs-say-otherwise) Apple relay: test on device, then fix code or docs
 4. [x] [KI-4](#ki-4-tunnel-wakes-up-every-2-seconds) Battery: 2-second wake-ups (fixed: 60 s idle timer plus Darwin signals)
 5. [x] [KI-5](#ki-5-background-list-refresh-probably-never-runs) Background refresh
-6. [ ] [KI-6](#ki-6-list-exceptions-cant-unblock-subdomains) List exceptions
+6. [x] [KI-6](#ki-6-list-exceptions-cant-unblock-subdomains) List exceptions (fixed: separate `listallow.bin`, suffix match)
 7. [x] [KI-7](#ki-7-pause-and-unblock-take-up-to-5-minutes) Pause/unblock delay (fixed with the DNS cache work)
 
 ---
@@ -155,7 +155,11 @@ more than 24 hours old (`FilterListsViewModel`).
 
 ### KI-6: List exceptions can't unblock subdomains
 
-- **Status:** open
+- **Status:** fixed ([spec](../specs/planned/explain-decisions-and-test-a-domain.md), pending a
+  device check). The compiler writes list exceptions to their own
+  `listallow.bin`, and `DomainMatcher` checks them at any suffix, so
+  `@@||example.com^` now unblocks `safe.example.com` even if a list blocks a
+  parent. See [ARCHITECTURE.md](ARCHITECTURE.md#compiled-blobs-and-precedence).
 - **Where:** `ios/IBlockerKit/Sources/IBlockerKit/Lists/BlocklistCompiler.swift`
   (`blockHashes.subtract(listAllowHashes)`), `DomainMatcher.verdict`
 
@@ -212,9 +216,13 @@ domain via a CNAME gets through.
 
 ### KI-11: The blocklist only stores hashes
 
-Domains are stored as 64-bit hashes, so the app can't show which list blocked
-a domain. `QueryLogRecord.listId` is reserved for this but always 0.
-Accidental hash collisions are negligible.
+- **Status:** fixed (attribution), pending a device check. The blocklist is
+  now format v2: each hash has a source number, so the app can show which
+  list blocked a domain (query log detail sheet and "Test a domain").
+  `QueryLogRecord.listId` now holds the decision source.
+
+Domains are still stored as 64-bit hashes, not readable strings. Accidental
+hash collisions are negligible.
 
 ### KI-12: The riskiest parts have no tests
 

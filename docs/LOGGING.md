@@ -109,10 +109,15 @@ between app and tunnel (`ipc` category). No domain names.
 
 | Level | Events |
 |---|---|
-| `notice` | `maintenance interval N s (idle)` / `(degraded)`: at start and whenever the interval changes |
+| `notice` | `maintenance interval N s (idle)` / `(degraded)`: at start and whenever the interval changes; `list exceptions generation A ≠ blocklist B, deferring reload` on each check until the generations match; `blocklist v1 loaded (no attribution); waiting for recompile` once per load of a v1 blob |
 | `info` | `maintenance: N passes (timer N, settings N, blocklist N)`, at most every 10 minutes; `blocklist reloaded: N rules, generation G` with ` (signal)` appended when a signal triggered the check |
 | `error` | `maintenance signal observer failed, timer only: <error>` (the tunnel falls back to timer passes) |
 | `debug` | `signal received: settingsChanged` / `blocklistChanged` (tunnel); `signal posted: <signal name>` (`ipc`, app side); `flushQueryLog requested` / `skipped: tunnel not connected` (`ipc`) |
+
+The app logs under `lists`: `notice` `recompiling: compiled format N → 2` when
+the stored format is older; `info` `compiled v2: N blocked, M list exceptions,
+K sources numbered` after a compile; `error` `source numbers exhausted, <id>
+recorded as unknown`. No domain names.
 
 `flushQueryLog failed: ...` and `ipc <request>: ...` failures are `error` in
 the `ipc` category.

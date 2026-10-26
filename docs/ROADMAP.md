@@ -15,7 +15,7 @@ Written 2026-10-25.
 | 1 | [Configurable failure policy](#configurable-failure-policy): encryption part ✅ done (`spec-c7e3c45d`, `spec-d10b070a`); filtering part moves to 5 | KI-1 part 1 (done) | — |
 | 2 | [Reliable blocklist updates](#reliable-blocklist-updates) (`spec-27c7b48b`) | — (can run alongside 1) | ✅ done |
 | 3 | [DNS caching](#dns-caching) (`spec-697234a9`) | 1 (sits in front of the router) | ✅ done, verified 2026-10-26 (low hit rate: iOS caches DNS itself) |
-| 4 | [Explain each decision](#explain-each-decision) + [Rule testing](#rule-testing) | 3 (to report "from cache") | L |
+| 4 | [Explain each decision](#explain-each-decision) + [Rule testing](#rule-testing) | 3 (to report "from cache") | ✅ done (explanations and "Test a domain"); list-change preview is a follow-up |
 | 5 | [Protection health indicator](#protection-health-indicator) | 0, 1 (status signals) | M — on hold, needs more design |
 | 6 | [Quick controls](#quick-controls) (profiles dropped) | — | ✅ done, verified 2026-10-26 (pause buttons; 60-min button deferred) |
 | 7 | [Status notifications](#status-notifications) | resolver status (done); 5 for rules/health signals | ✅ done, verified 2026-10-26 |
@@ -108,6 +108,9 @@ pending. iOS caches on its own side too. The list below is what was built.
 
 ## Explain each decision
 
+**Status:** done ([spec](../specs/planned/explain-decisions-and-test-a-domain.md); KI-6 and KI-11
+fixed). The text below is the original plan.
+
 **Want:** show which rule and list blocked a domain, which resolver answered
 an allowed lookup, and whether the answer came from the cache.
 
@@ -132,6 +135,10 @@ it's one of the query's own suffixes. So no domain strings need storing in the
 blob.
 
 ## Rule testing
+
+**Status:** "Test a domain" is done. The **preview** (compile a changed list
+selection in memory and show the difference for a domain and the rule count
+before and after) is not built; it remains a follow-up.
 
 **Want:** enter a domain to see what would happen and why, without a live DNS
 lookup, and preview how list changes would affect it.

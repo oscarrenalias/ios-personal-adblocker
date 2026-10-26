@@ -124,13 +124,23 @@ public struct FilterListState: Codable, Sendable, Equatable {
     /// immediate recompile at launch. Optional so state saved by older
     /// builds still decodes.
     public var compiledSeedVersion: UInt32?
+    /// Source id -> source number used when the rules were last compiled.
+    /// Optional so state saved by older builds still decodes.
+    public var sourceNumbers: [String: UInt8]?
+    /// Compiled rule format version at the time of the last compile.
+    /// Optional so state saved by older builds still decodes.
+    public var compiledFormatVersion: UInt32?
 
     public init(sources: [FilterListSource] = FilterListSource.builtIn,
                 metadata: [String: FilterListMetadata] = [:],
                 userAllowlist: [String] = [],
                 userDenylist: [String] = [],
                 generation: UInt32 = 0,
-                compiledSeedVersion: UInt32? = nil) {
+                compiledSeedVersion: UInt32? = nil,
+                sourceNumbers: [String: UInt8]? = nil,
+                compiledFormatVersion: UInt32? = nil) {
+        self.sourceNumbers = sourceNumbers
+        self.compiledFormatVersion = compiledFormatVersion
         self.sources = sources
         self.metadata = metadata
         self.userAllowlist = userAllowlist
