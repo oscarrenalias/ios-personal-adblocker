@@ -15,10 +15,21 @@ public struct DNSCache: Sendable {
         public let hasEDNS: Bool
 
         public init(rawQuestion: [UInt8], hasEDNS: Bool) {
-            // Lowercasing only A-Z keeps label length bytes (<= 63) and
-            // qtype/qclass bytes intact except where they happen to be 0x41-0x5A,
-            // which are folded identically for every query, so keys stay consistent.
-            question = rawQuestion.map { $0 >= 0x41 && $0 <= 0x5A ? $0 | 0x20 : $0 }
+            // Fold only the name's label bytes. The length bytes, qtype and
+            // qclass stay untouched (qtype 65 is 0x0041, which must not
+            // collide with 0x0061).
+            var out = rawQuestion
+            var i = 0
+            while i < out.count, out[i] != 0 {
+                let end = min(i + 1 + Int(out[i]), out.count)
+                var j = i + 1
+                while j < end {
+                    if out[j] >= 0x41 && out[j] <= 0x5A { out[j] |= 0x20 }
+                    j += 1
+                }
+                i = end
+            }
+            question = out
             self.hasEDNS = hasEDNS
         }
     }
