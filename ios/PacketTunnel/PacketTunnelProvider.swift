@@ -28,6 +28,94 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private let errorLimiter = LockedBox(ErrorLogLimiter(interval: 60))
     private let physicalInterface = InterfaceIndexBox()
     private let pathQueue = DispatchQueue(label: "net.renalias.adblocker.tunnel.path")
+    private let notifier = StatusNotifier()
+
+    /// Drives status notification events 1-4 through the policy and poster.
+    /// An actor so router callbacks, IPC and start/stop don't interleave
+    /// their load-decide-save of the shared episode state.
+    private actor StatusNotifier {
+        private let log = Log(category: "notify")
+        private var running = false
+        /// Last alternative resolver name seen, so a restore can name it.
+        private var lastResolverName: String?
+
+        func tunnelStarting() { running = true }
+
+        func resolverStatusChanged(_ status: ResolverStatus) async {
+            guard running else {
+                log.debug("resolver status change ignored: tunnel not running")
+                return
+            }
+            let name: String?
+            let events: [StatusNotificationEvent]
+            switch status {
+            case .fallingBack(let n):
+                name = n
+                events = [.problemStarted(.resolverFallback)]
+            case .failing(let n):
+                name = n
+                events = [.problemStarted(.resolverFailing)]
+            case .alternative(let n, _):
+                name = n
+                events = [.problemCleared(.resolverFallback), .problemCleared(.resolverFailing)]
+            case .network:
+                name = nil
+                events = [.problemCleared(.resolverFallback), .problemCleared(.resolverFailing)]
+            }
+            if let name { lastResolverName = name }
+            await run(events, resolverName: name ?? lastResolverName)
+        }
+
+        /// Event 3 on an unexpected stop; always ends pending 1, 2, 6, 7.
+        func tunnelStopped(reason: NEProviderStopReason) async {
+            running = false
+            let stopReason = TunnelStopReason(rawValue: reason.rawValue)
+            let marker = Self.settings()?.userTurnedOff ?? false
+            let classification = StatusNotificationPolicy.classifyStop(reason: stopReason, userTurnedOffMarker: marker)
+            log.notice("stop classified \(classification == .expected ? "expected" : "unexpected"): reason \(stopReason.logName), user-off marker \(marker ? "set" : "clear")")
+            var events: [StatusNotificationEvent] = [.tunnelStopped]
+            if classification == .unexpected { events.append(.problemStarted(.protectionStopped)) }
+            await run(events, resolverName: nil)
+        }
+
+        /// Cancels a pending event 3, or posts its restore (event 4).
+        func tunnelStarted() async {
+            running = true
+            await run([.problemCleared(.protectionStopped)], resolverName: nil)
+        }
+
+        private static func settings() -> SharedSettings? {
+            AppGroupPaths.groupID(from: Bundle.main).flatMap { SharedSettings(groupID: $0) }
+        }
+
+        private func run(_ events: [StatusNotificationEvent], resolverName: String?) async {
+            guard let settings = Self.settings() else {
+                log.error("notification events skipped: shared settings unavailable")
+                return
+            }
+            guard settings.settingsAvailable else {
+                log.debug("notification events skipped: settings not yet readable")
+                return
+            }
+            var state = StatusNotificationState.load(from: settings)
+            let preferences = StatusNotificationPreferences(settings: settings)
+            let now = Date()
+            var decisions: [StatusNotificationDecision] = []
+            for event in events {
+                let decision = StatusNotificationPolicy.decide(event: event, state: state, preferences: preferences, now: now)
+                state = decision.state
+                decisions.append(decision)
+            }
+            state.save(to: settings)
+            let poster = NotificationPoster(preferences: {
+                Self.settings().map { StatusNotificationPreferences(settings: $0) }
+                    ?? StatusNotificationPreferences(masterEnabled: false)
+            })
+            for decision in decisions {
+                await poster.execute(decision, now: now, resolverName: resolverName)
+            }
+        }
+    }
 
     /// Thread-safe holder for the current physical interface index, written
     /// from the path monitor queue and read from upstream resolves.
@@ -78,7 +166,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             alternative = (upstream, settings.alternativeName, settings.alternative.isEncrypted)
         }
-        let router = ResolverRouter(network: network, alternative: alternative, policy: settings.fallbackPolicy)
+        let notifier = notifier
+        let router = ResolverRouter(
+            network: network,
+            alternative: alternative,
+            policy: settings.fallbackPolicy,
+            onStatusChange: { status in
+                Task { await notifier.resolverStatusChanged(status) }
+            }
+        )
         Self.log.notice("resolver settings applied: source \(source), alternative \(settings.useAlternative ? "on" : "off"), name \(settings.alternativeName), url \(settings.alternative.displayName), policy \(settings.fallbackPolicy.rawValue)")
         return router
     }
@@ -126,6 +222,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         self.paths = paths
         try? paths.ensureDirectories()
+        await notifier.tunnelStarting()
 
         let settings = SharedSettings(groupID: groupID)
         let settingsReadable = settings?.settingsAvailable ?? false
@@ -207,6 +304,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         try await setTunnelNetworkSettings(networkSettings)
         settings?.protectionActive = true
+        await notifier.tunnelStarted()
 
         Self.log.notice("tunnel up — \(matcher.blockedEntryCount) rules, resolver \(resolverSettings.useAlternative ? resolverSettings.alternativeName : "Network DNS"), available memory \(os_proc_available_memory())")
 
@@ -224,6 +322,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
            let settings = SharedSettings(groupID: groupID) {
             settings.protectionActive = false
         }
+        await notifier.tunnelStopped(reason: reason)
         if let engine {
             await engine.flush()
         }
@@ -264,6 +363,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if let newRouter = makeRouter(resolverSettings, source: "ipc") {
                 await engine.setUpstream(newRouter)
                 router = newRouter
+                await notifier.resolverStatusChanged(newRouter.status)
                 response = .ok
             } else {
                 response = .failure("invalid resolver settings")
@@ -375,6 +475,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         if let newRouter = self.makeRouter(resolverSettings, source: "recovery") {
                             await engine.setUpstream(newRouter)
                             self.router = newRouter
+                            await self.notifier.resolverStatusChanged(newRouter.status)
                             upstreamName = resolverSettings.useAlternative ? resolverSettings.alternativeName : "Network DNS"
                         }
                         await engine.setLogEnabled(settings.queryLogEnabled)

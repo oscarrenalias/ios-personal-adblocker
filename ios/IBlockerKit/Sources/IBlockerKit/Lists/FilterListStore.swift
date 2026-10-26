@@ -14,6 +14,11 @@ public actor FilterListStore {
     private var inFlightScope: Set<String>?
     /// Identity of `inFlightUpdate`, so a finishing run only clears its own state.
     private var inFlightRunID = 0
+    /// Event 5 hooks; nil disables list notifications (tests, extensions).
+    private let notifier: NotificationPoster?
+    private let settings: SharedSettings?
+    private let now: @Sendable () -> Date
+    private let notifyLog = Log(category: "notify")
 
     /// What started an update run; logged only.
     public enum UpdateTrigger: String, Sendable {
@@ -28,7 +33,13 @@ public actor FilterListStore {
                 compiler: @escaping Compiler = { state, paths in
                     try BlocklistCompiler.compile(state: &state, paths: paths)
                 },
-                fetch: @escaping FilterListUpdater.Fetch) {
+                fetch: @escaping FilterListUpdater.Fetch,
+                notifier: NotificationPoster? = nil,
+                settings: SharedSettings? = nil,
+                now: @escaping @Sendable () -> Date = { Date() }) {
+        self.notifier = notifier
+        self.settings = settings
+        self.now = now
         self.paths = paths
         self.compiler = compiler
         self.updater = FilterListUpdater(paths: paths, fetch: fetch)
@@ -39,7 +50,13 @@ public actor FilterListStore {
                 compiler: @escaping Compiler = { state, paths in
                     try BlocklistCompiler.compile(state: &state, paths: paths)
                 },
-                session: URLSession = .shared) {
+                session: URLSession = .shared,
+                notifier: NotificationPoster? = nil,
+                settings: SharedSettings? = nil,
+                now: @escaping @Sendable () -> Date = { Date() }) {
+        self.notifier = notifier
+        self.settings = settings
+        self.now = now
         self.paths = paths
         self.compiler = compiler
         self.updater = FilterListUpdater(paths: paths, session: session)
@@ -112,9 +129,86 @@ public actor FilterListStore {
             log.error("update post-processing failed: \(error)")
         }
 
+        await notifyAfterRun(summary: summary, trigger: trigger)
+
         let ms = Int(Date().timeIntervalSince(started) * 1000)
         log.info("update finished (trigger \(trigger.rawValue), \(ms) ms): \(summary.updatedSourceIDs.count) updated, \(summary.unchangedSourceIDs.count) unchanged, \(summary.rejectedSourceIDs.count) rejected, \(summary.failedSourceIDs.count) failed")
         return summary
+    }
+
+    // MARK: Event 5 notifications
+
+    private static func episodeKey(_ kind: StatusNotificationKind, _ id: String) -> String {
+        "\(kind.rawValue).\(id)"
+    }
+
+    /// Rejections (not for `.user` runs) and staleness, once per list per
+    /// episode. An accepted update ends both of that list's episodes; the
+    /// staleness check runs after every run, whatever the trigger.
+    private func notifyAfterRun(summary: UpdateSummary, trigger: UpdateTrigger) async {
+        guard let notifier, let settings else { return }
+        let state = FilterListState.load(from: paths.filterStateURL)
+        let sources = Dictionary(state.sources.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+
+        for id in summary.updatedSourceIDs {
+            for kind in [StatusNotificationKind.listRejected, .listStale] {
+                endEpisode(kind, id, settings)
+            }
+        }
+
+        if trigger != .user {
+            for id in summary.rejectedSourceIDs {
+                await notifyOnce(.listRejected, id: id, source: sources[id], notifier: notifier, settings: settings)
+            }
+        } else if !summary.rejectedSourceIDs.isEmpty {
+            notifyLog.debug("list-rejected not notified: user-triggered run")
+        }
+
+        let current = now()
+        for source in state.sources where source.enabled {
+            let stale = ListFreshness.isStale(lastAccepted: state.metadata[source.id]?.lastAccepted, now: current)
+            if stale {
+                await notifyOnce(.listStale, id: source.id, source: source, notifier: notifier, settings: settings)
+            } else {
+                endEpisode(.listStale, source.id, settings)
+            }
+        }
+    }
+
+    private func endEpisode(_ kind: StatusNotificationKind, _ id: String, _ settings: SharedSettings) {
+        let key = Self.episodeKey(kind, id)
+        guard settings.notificationEpisode(forKind: key).isOpen else { return }
+        settings.setNotificationEpisode(NotificationEpisodeState(), forKind: key)
+        notifyLog.info("\(kind.rawValue) episode ended (list \(id))")
+    }
+
+    private func notifyOnce(_ kind: StatusNotificationKind, id: String, source: FilterListSource?,
+                            notifier: NotificationPoster, settings: SharedSettings) async {
+        let key = Self.episodeKey(kind, id)
+        if settings.notificationEpisode(forKind: key).isOpen {
+            notifyLog.debug("\(kind.rawValue) already notified this episode (list \(id))")
+            return
+        }
+        let current = now()
+        let decision = StatusNotificationPolicy.decide(
+            event: .oneShot(kind),
+            state: StatusNotificationState.load(from: settings),
+            preferences: StatusNotificationPreferences(settings: settings),
+            now: current
+        )
+        // Preference-blocked lists stay out of an episode so enabling the
+        // toggle later can still notify; rate-limited ones count as notified.
+        let rateLimited = decision.suppressions.contains { $0.reason == .rateLimited }
+        guard !decision.actions.isEmpty || rateLimited else {
+            await notifier.execute(decision, now: current)
+            return
+        }
+        settings.setNotificationFireTimes(decision.state.times(kind), forKind: kind.rawValue)
+        settings.setNotificationEpisode(
+            NotificationEpisodeState(isOpen: true, scheduledFireTime: nil, notified: !decision.actions.isEmpty),
+            forKind: key
+        )
+        await notifier.execute(decision, now: current, listName: source.map(StatusNotificationContentBuilder.listDisplayName))
     }
 
     /// Loads the current state, applies `body`, saves, and returns the
