@@ -5,7 +5,7 @@ description: "Four Control Center buttons pausing ad blocking for 5/10/30/60 min
 dependencies: null
 priority: medium
 complexity: null
-status: planned
+status: done
 tags:
 - controls
 - widgets
