@@ -23,6 +23,7 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
     private let network: DNSUpstream
     private let alternative: Alternative?
     private let policy: FallbackPolicy
+    private let onStatusChange: (@Sendable (ResolverStatus) -> Void)?
     private let lock = NSLock()
     private var breaker: CircuitBreaker
     private var lastStatus: ResolverStatus
@@ -31,8 +32,10 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
         network: DNSUpstream,
         alternative: Alternative?,
         policy: FallbackPolicy,
-        breaker: CircuitBreaker? = nil
+        breaker: CircuitBreaker? = nil,
+        onStatusChange: (@Sendable (ResolverStatus) -> Void)? = nil
     ) {
+        self.onStatusChange = onStatusChange
         self.network = network
         self.alternative = alternative
         self.policy = policy
@@ -54,11 +57,11 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
     /// No-op when the alternative is off.
     public func networkChanged() {
         guard let alternative else { return }
-        let probe: Int? = lock.withLock {
+        let (changed, probe): (ResolverStatus?, Int?) = lock.withLock {
             breaker.networkChange()
-            noteStatusChange()
-            return startProbeIfDue()
+            return (noteStatusChange(), startProbeIfDue())
         }
+        notify(changed)
         if let generation = probe { runProbe(alternative, generation: generation) }
     }
 
@@ -98,16 +101,18 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
             let response = try await Self.withTimeout(Self.alternativeTimeout) {
                 try await alternative.upstream.resolve(query)
             }
-            lock.withLock {
+            let changed: ResolverStatus? = lock.withLock {
                 breaker.recordSuccess(generation: attempt.generation)
-                noteStatusChange()
+                return noteStatusChange()
             }
+            notify(changed)
             return response
         } catch {
-            lock.withLock {
+            let changed: ResolverStatus? = lock.withLock {
                 breaker.recordFailure(generation: attempt.generation)
-                noteStatusChange()
+                return noteStatusChange()
             }
+            notify(changed)
             return try await fallBack(
                 query, parsed: parsed, error: "\(error)", elapsed: Date().timeIntervalSince(start)
             )
@@ -130,21 +135,24 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
                 }
                 guard response.count >= 12, response[3] & 0x0F == 0 else {
                     let rcode = response.count >= 4 ? Int(response[3] & 0x0F) : -1
-                    lock.withLock {
+                    let changed: ResolverStatus? = lock.withLock {
                         breaker.probeFailed(generation: generation, error: "rcode \(rcode)")
-                        noteStatusChange()
+                        return noteStatusChange()
                     }
+                    notify(changed)
                     return
                 }
-                lock.withLock {
+                let changed: ResolverStatus? = lock.withLock {
                     breaker.probeSucceeded(generation: generation)
-                    noteStatusChange()
+                    return noteStatusChange()
                 }
+                notify(changed)
             } catch {
-                lock.withLock {
+                let changed: ResolverStatus? = lock.withLock {
                     breaker.probeFailed(generation: generation, error: "\(error)")
-                    noteStatusChange()
+                    return noteStatusChange()
                 }
+                notify(changed)
             }
         }
     }
@@ -156,13 +164,20 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
         return policy == .networkDNS ? .fallingBack(name: alternative.name) : .failing(name: alternative.name)
     }
 
-    /// Must be called with the lock held. Logs when the status differs from the last one seen.
-    private func noteStatusChange() {
+    /// Invokes the status-change callback. Must be called with the lock released.
+    private func notify(_ status: ResolverStatus?) {
+        if let status { onStatusChange?(status) }
+    }
+
+    /// Must be called with the lock held. Logs when the status differs from the last one seen
+    /// and returns the new status in that case, so the caller can `notify` after unlocking.
+    private func noteStatusChange() -> ResolverStatus? {
         let new = computeStatus()
-        guard new != lastStatus else { return }
+        guard new != lastStatus else { return nil }
         let old = lastStatus
         lastStatus = new
         Self.log.notice("resolver status \(old) -> \(new), encrypted \(Self.isEncrypted(new) ? "yes" : "no")")
+        return new
     }
 
     private static func isEncrypted(_ status: ResolverStatus) -> Bool {
