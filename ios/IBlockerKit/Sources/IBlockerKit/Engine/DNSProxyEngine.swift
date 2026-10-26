@@ -32,6 +32,8 @@ public actor DNSProxyEngine {
     private let statsURL: URL?
     private var configuration: Configuration
     private var stats: BlockerStats
+    /// Last stats value persisted (or loaded); flush skips the write when unchanged.
+    private var lastWrittenStats: BlockerStats
     private let startedAt = Date()
     private var inFlight = 0
     /// While set to a future instant, blocking is suspended and every query
@@ -48,7 +50,9 @@ public actor DNSProxyEngine {
         self.logWriter = logWriter
         self.statsURL = statsURL
         self.configuration = configuration
-        self.stats = statsURL.map { StatsPersistence.load(from: $0) } ?? BlockerStats()
+        let loaded = statsURL.map { StatsPersistence.load(from: $0) } ?? BlockerStats()
+        self.stats = loaded
+        self.lastWrittenStats = loaded
     }
 
     // MARK: - Packet path
@@ -193,8 +197,9 @@ public actor DNSProxyEngine {
     /// the provider, before stats snapshots, and at tunnel shutdown.
     public func flush() {
         try? logWriter?.flush()
-        if let statsURL {
+        if let statsURL, stats != lastWrittenStats {
             StatsPersistence.save(stats, to: statsURL)
+            lastWrittenStats = stats
         }
     }
 }
