@@ -21,11 +21,16 @@ public struct DomainMatcher: Sendable {
     /// compiled blobs so the tunnel keeps its guaranteed floor even when the
     /// on-disk blocklist is missing or predates an app update.
     public let builtInBlockHashes: Set<UInt64>
+    /// List-level `@@` exceptions (listallow.bin). Stored only; matching
+    /// logic arrives in a later bead.
+    public let listAllowlist: CompiledBlocklistView?
 
     public init(blocklist: CompiledBlocklistView?,
                 userAllowlist: CompiledBlocklistView? = nil,
                 userDenylist: CompiledBlocklistView? = nil,
-                builtInBlockHashes: Set<UInt64> = []) {
+                builtInBlockHashes: Set<UInt64> = [],
+                listAllowlist: CompiledBlocklistView? = nil) {
+        self.listAllowlist = listAllowlist
         self.blocklist = blocklist
         self.userAllowlist = userAllowlist
         self.userDenylist = userDenylist
