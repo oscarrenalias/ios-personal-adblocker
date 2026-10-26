@@ -20,6 +20,7 @@ worth knowing.
 5. [x] [KI-5](#ki-5-background-list-refresh-probably-never-runs) Background refresh
 6. [x] [KI-6](#ki-6-list-exceptions-cant-unblock-subdomains) List exceptions (fixed: separate `listallow.bin`, suffix match)
 7. [x] [KI-7](#ki-7-pause-and-unblock-take-up-to-5-minutes) Pause/unblock delay (fixed with the DNS cache work)
+8. [x] [KI-8](#ki-8-query-log-is-a-detailed-browsing-history) Query log default (decided: stays on)
 
 ---
 
@@ -186,14 +187,16 @@ answer for up to 5 minutes.
 
 ### KI-8: Query log is a detailed browsing history
 
-- **Status:** open, decision needed
+- **Status:** closed, decided 2026-10-26: the log stays on by default at its
+  current size. It's a personal app, and the log powers the decision
+  explanations and the Dashboard chart. It can be turned off in Settings.
 - **Where:** `SharedSettings.queryLogEnabled` (default `true`),
   `QueryLogRing.defaultCapacity` (65,536)
 
 The log is on by default and keeps about 65,000 recent domains on the phone.
 That's fine for personal use, but it should be a conscious choice.
 
-**Options:** keep as is, make it smaller, or turn it off by default.
+**Options considered:** keep as is (chosen), make it smaller, or turn it off by default.
 
 ---
 
