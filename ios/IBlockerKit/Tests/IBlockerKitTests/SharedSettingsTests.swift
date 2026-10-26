@@ -25,6 +25,33 @@ final class SharedSettingsTests: XCTestCase {
         XCTAssertNil(settings.verboseLoggingUntil)
     }
 
+    func testWidgetResolverStatusRoundTripAndInvalidData() throws {
+        let suite = "iblocker-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SharedSettings(defaults: defaults)
+
+        XCTAssertNil(settings.widgetResolverStatus)
+        let cases: [ResolverStatus] = [
+            .network, .alternative(name: "A", encrypted: true), .alternative(name: "A", encrypted: false),
+            .fallingBack(name: "B"), .failing(name: "C"),
+        ]
+        for status in cases {
+            settings.widgetResolverStatus = status
+            XCTAssertEqual(settings.widgetResolverStatus, status)
+            try settings.writeWidgetResolverStatus(status)
+            XCTAssertEqual(settings.widgetResolverStatus, status)
+        }
+        settings.widgetResolverStatus = nil
+        XCTAssertNil(settings.widgetResolverStatus)
+        settings.widgetResolverStatus = .network
+        try settings.writeWidgetResolverStatus(nil)
+        XCTAssertNil(settings.widgetResolverStatus)
+
+        defaults.set(Data([0xde, 0xad, 0xbe, 0xef]), forKey: SharedSettings.Keys.widgetResolverStatus)
+        XCTAssertNil(settings.widgetResolverStatus)
+    }
+
     func testRelayStrategyDefaultsToBlockDomains() {
         let (settings, suite) = makeSettings()
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
