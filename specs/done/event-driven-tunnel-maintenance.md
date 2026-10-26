@@ -5,7 +5,7 @@ description: Replace the 2 s tunnel maintenance loop with Darwin-notification si
 dependencies: null
 priority: medium
 complexity: null
-status: planned
+status: done
 tags:
 - tunnel
 - battery
