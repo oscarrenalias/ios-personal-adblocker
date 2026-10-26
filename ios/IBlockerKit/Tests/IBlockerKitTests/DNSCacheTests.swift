@@ -1007,37 +1007,23 @@ final class CacheRowPresentationTests: XCTestCase {
         XCTAssertEqual(CacheRowPresentation(tunnelConnected: false, stats: nil).text, "Not available")
     }
 
-    func testOlderTunnelWithoutCacheFieldsIsNotAvailable() {
-        for s in [stats(entries: nil), stats(hits: nil), stats(misses: nil)] {
-            XCTAssertEqual(CacheRowPresentation(tunnelConnected: true, stats: s).text, "Not available")
+    func testMissingEntriesIsNotAvailable() {
+        XCTAssertEqual(CacheRowPresentation(tunnelConnected: true, stats: stats(entries: nil)).text, "Not available")
+    }
+
+    func testShowsEntryCountWithPluralisation() {
+        func text(_ n: UInt64) -> String {
+            CacheRowPresentation(tunnelConnected: true, stats: stats(entries: n)).text
         }
+        XCTAssertEqual(text(0), "0 entries")
+        XCTAssertEqual(text(1), "1 entry")
+        XCTAssertEqual(text(12), "12 entries")
     }
 
-    func testZeroLookupsShowsNoLookupsYet() {
-        XCTAssertEqual(CacheRowPresentation(tunnelConnected: true, stats: stats(entries: 0)).text,
-                       "0 entries · no lookups yet")
-        XCTAssertEqual(CacheRowPresentation(tunnelConnected: true, stats: stats(entries: 12)).text,
-                       "12 entries · no lookups yet")
-    }
-
-    func testPercentagesRoundDown() {
-        func text(_ hits: UInt64, _ misses: UInt64) -> String {
-            CacheRowPresentation(tunnelConnected: true, stats: stats(entries: 3, hits: hits, misses: misses)).text
-        }
-        XCTAssertEqual(text(1, 2), "3 entries · 33% hit rate")
-        XCTAssertEqual(text(2, 1), "3 entries · 66% hit rate")
-        XCTAssertEqual(text(199, 1), "3 entries · 99% hit rate")
-        XCTAssertEqual(text(1, 199), "3 entries · 0% hit rate")
-        XCTAssertEqual(text(0, 4), "3 entries · 0% hit rate")
-        XCTAssertEqual(text(4, 0), "3 entries · 100% hit rate")
-        XCTAssertEqual(text(1, 1), "3 entries · 50% hit rate")
-        XCTAssertEqual(text(29, 71), "3 entries · 29% hit rate")
-    }
-
-    func testHugeCountersDoNotTrap() {
-        let s = stats(entries: 1, hits: UInt64.max, misses: UInt64.max)
-        XCTAssertEqual(CacheRowPresentation(tunnelConnected: true, stats: s).text, "1 entries · 50% hit rate")
-        let big = stats(entries: 1, hits: UInt64.max / 2, misses: 10)
-        XCTAssertTrue(CacheRowPresentation(tunnelConnected: true, stats: big).text.hasSuffix("% hit rate"))
+    func testMissingHitsOrMissesStillShowsEntryCount() {
+        XCTAssertEqual(CacheRowPresentation(tunnelConnected: true, stats: stats(entries: 3, hits: nil)).text, "3 entries")
+        XCTAssertEqual(CacheRowPresentation(tunnelConnected: true, stats: stats(entries: 3, misses: nil)).text, "3 entries")
+        XCTAssertEqual(CacheRowPresentation(tunnelConnected: true, stats: stats(entries: 3, hits: nil, misses: nil)).text, "3 entries")
+        XCTAssertFalse(CacheRowPresentation(tunnelConnected: true, stats: stats(entries: 3, hits: 9, misses: 1)).text.contains("hit rate"))
     }
 }
