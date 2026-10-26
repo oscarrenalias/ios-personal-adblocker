@@ -30,6 +30,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
     private var paths: AppGroupPaths?
     private var maintenanceTask: Task<Void, Never>?
+    private var maintenanceObservers: [TunnelSignal.Observer] = []
+    private let maintenanceQueue = DispatchQueue(label: "net.renalias.adblocker.tunnel.maintenance")
     private var pathMonitor: NWPathMonitor?
     /// Rate-limits blob load error logs (once per distinct error per 60 s).
     private let errorLimiter = LockedBox(ErrorLogLimiter(interval: 60))
@@ -421,6 +423,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func stopTunnel(with reason: NEProviderStopReason) async {
         Self.log.notice("tunnel stopping: \(String(describing: reason))")
+        maintenanceObservers.forEach { $0.cancel() }
+        maintenanceObservers = []
         maintenanceTask?.cancel()
         pathMonitor?.cancel()
         pathMonitor = nil
@@ -549,35 +553,107 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    /// Flushes the log/stats every 2 s and picks up recompiled blocklists
-    /// even if the app's reload IPC never arrives (e.g. app was killed).
-    /// While degraded (started before first unlock) it also retries the
-    /// unreadable settings and blobs on every tick.
+    /// One task sleeps until the schedule's next timer wake or a Darwin
+    /// signal (settings / blocklist changed), then runs one pass. Signals
+    /// arriving during a pass coalesce into a single follow-up pass.
+    /// Idle passes run every 60 s; while degraded (started before first
+    /// unlock) every 2 s, retrying the unreadable settings and blobs.
     private func startMaintenance(paths: AppGroupPaths, recovery initial: TunnelRecovery, startedAt: Date) {
         let groupID = AppGroupPaths.groupID(from: Bundle.main)
+        let pending = LockedBox(Set<MaintenanceSchedule.WakeReason>())
+        let (wakeStream, wakeContinuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let post: @Sendable (MaintenanceSchedule.WakeReason) -> Void = { reason in
+            pending.withValue { _ = $0.insert(reason) }
+            wakeContinuation.yield()
+        }
+
+        maintenanceObservers.forEach { $0.cancel() }
+        maintenanceObservers = []
+        let signals: [(TunnelSignal, MaintenanceSchedule.WakeReason, String)] = [
+            (.settingsChanged, .settings, "settingsChanged"),
+            (.blocklistChanged, .blocklist, "blocklistChanged"),
+        ]
+        for (signal, reason, name) in signals {
+            do {
+                let observer = try TunnelSignal.observe(signal, queue: maintenanceQueue) {
+                    Self.log.debug("signal received: \(name)")
+                    post(reason)
+                }
+                maintenanceObservers.append(observer)
+            } catch {
+                Self.log.error("maintenance signal observer failed, timer only: \(String(describing: error))")
+            }
+        }
+
         maintenanceTask = Task { [weak self] in
-            var tick: UInt64 = 0
             var recovery = initial
+            var schedule = MaintenanceSchedule(degraded: recovery.isDegraded, now: Date())
+            var verboseUntil: Date?
+            var lastLoggedInterval: TimeInterval?
+            var counts: [MaintenanceSchedule.WakeReason: Int] = [:]
+            var passes = 0
+            var summaryAt = Date()
+
+            func logInterval(_ degraded: Bool) {
+                let interval = MaintenanceSchedule.interval(degraded: degraded)
+                guard interval != lastLoggedInterval else { return }
+                lastLoggedInterval = interval
+                Self.log.notice("maintenance interval \(Int(interval)) s (\(degraded ? "degraded" : "idle"))")
+            }
+            logInterval(recovery.isDegraded)
+
+            var iterator = wakeStream.makeAsyncIterator()
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                let wakeAt = schedule.wake(now: Date(), verboseLoggingUntil: verboseUntil)
+                let delay = max(0, wakeAt.timeIntervalSinceNow)
+                let timer = Task {
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    guard !Task.isCancelled else { return }
+                    post(.timer)
+                }
+                _ = await iterator.next()
+                timer.cancel()
+                if Task.isCancelled { return }
+                let reasons = pending.withValue { set -> Set<MaintenanceSchedule.WakeReason> in
+                    defer { set.removeAll() }
+                    return set
+                }
+                guard !reasons.isEmpty else { continue }
                 guard let self, let engine = self.engine else { return }
-                await engine.flush()
+
+                // Plan one pass covering every coalesced reason.
+                var steps: [MaintenanceSchedule.Step] = []
+                let now = Date()
+                for reason in [MaintenanceSchedule.WakeReason.timer, .settings, .blocklist] where reasons.contains(reason) {
+                    let plan = schedule.plan(reason: reason, degraded: recovery.isDegraded,
+                                             now: now, verboseLoggingUntil: verboseUntil)
+                    for step in plan.steps where !steps.contains(step) { steps.append(step) }
+                    counts[reason, default: 0] += 1
+                }
+                passes += 1
+                logInterval(schedule.degraded)
+                let signalTriggered = !reasons.contains(.timer)
+
+                if steps.contains(.flush) { await engine.flush() }
 
                 let settings = groupID.flatMap { SharedSettings(groupID: $0) }
                 let settingsReadable = settings?.settingsAvailable ?? false
 
-                // Re-read the pause deadline so a pause set by the widget or
-                // an App Intent (which can't reach the tunnel over IPC)
-                // propagates within one tick.
-                if let settings, settingsReadable || !recovery.settingsPending {
-                    await engine.setPaused(until: settings.pausedUntil)
-                    await self.notifier.pauseDeadlineChanged(settings.pausedUntil)
-                    Self.applyVerbose(until: settings.verboseLoggingUntil)
-                    if settingsReadable { await self.notifier.retryDeferredStart() }
+                if steps.contains(.settings) {
+                    // Re-read the pause deadline so a pause set by the widget
+                    // or an App Intent (which can't reach the tunnel over IPC)
+                    // propagates within one pass.
+                    if let settings, settingsReadable || !recovery.settingsPending {
+                        await engine.setPaused(until: settings.pausedUntil)
+                        await self.notifier.pauseDeadlineChanged(settings.pausedUntil)
+                        verboseUntil = settings.verboseLoggingUntil
+                        Self.applyVerbose(until: verboseUntil)
+                        if settingsReadable { await self.notifier.retryDeferredStart() }
+                    }
                 }
 
                 var reloaded: DomainMatcher?
-                if recovery.isDegraded {
+                if steps.contains(.recovery), recovery.isDegraded {
                     var blocklistReadable = false
                     if recovery.blocklistPending {
                         let result = self.currentMatcher(paths: paths)
@@ -599,7 +675,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         }
                         await engine.setLogEnabled(settings.queryLogEnabled)
                         await engine.setPaused(until: settings.pausedUntil)
-                        Self.applyVerbose(until: settings.verboseLoggingUntil)
+                        verboseUntil = settings.verboseLoggingUntil
+                        Self.applyVerbose(until: verboseUntil)
                     }
                     if let matcher = reloaded {
                         await engine.reload(matcher: matcher)
@@ -613,15 +690,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     }
                 }
 
-                tick += 1
-                if tick % 5 == 0, reloaded == nil, !recovery.blocklistPending {
+                if steps.contains(.blocklistCheck), reloaded == nil, !recovery.blocklistPending {
                     let current = await engine.blocklistGeneration
                     do {
                         let onDisk = try CompiledBlocklistView(contentsOf: paths.blocklistURL)
                         if onDisk.generation != current {
                             let matcher = self.currentMatcher(paths: paths).matcher
                             await engine.reload(matcher: matcher)
-                            Self.log.info("blocklist reloaded: \(matcher.blockedEntryCount) rules, generation \(onDisk.generation)")
+                            Self.log.info("blocklist reloaded: \(matcher.blockedEntryCount) rules, generation \(onDisk.generation)\(signalTriggered ? " (signal)" : "")")
                         }
                     } catch {
                         // A missing file is normal before the first compile.
@@ -632,6 +708,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                             }
                         }
                     }
+                }
+
+                if Date().timeIntervalSince(summaryAt) >= 600 {
+                    Self.log.info("maintenance: \(passes) passes (timer \(counts[.timer] ?? 0), settings \(counts[.settings] ?? 0), blocklist \(counts[.blocklist] ?? 0))")
+                    passes = 0
+                    counts = [:]
+                    summaryAt = Date()
                 }
             }
         }
