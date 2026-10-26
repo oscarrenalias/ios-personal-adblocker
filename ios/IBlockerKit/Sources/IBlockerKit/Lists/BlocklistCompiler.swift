@@ -23,6 +23,10 @@ public enum BlocklistCompiler {
         postSignal: (TunnelSignal) -> Void = TunnelSignal.post
     ) throws -> CompileStats {
         var stats = CompileStats()
+        // First pair per hash wins, so iterating sources in state order makes
+        // the first enabled source the attributed one.
+        var blockEntries: [(hash: UInt64, source: UInt8)] = []
+        var listAllowEntries: [(hash: UInt64, source: UInt8)] = []
         var blockHashes = Set<UInt64>()
         var listAllowHashes = Set<UInt64>()
 
@@ -48,30 +52,38 @@ public enum BlocklistCompiler {
             metadata.entryCount = parsed.blockDomains.count
             state.metadata[source.id] = metadata
 
+            let number = state.sourceNumbers?[source.id] ?? 0
             for domain in parsed.blockDomains {
-                blockHashes.insert(FNV1a.hash64(domain))
+                let hash = FNV1a.hash64(domain)
+                if blockHashes.insert(hash).inserted { blockEntries.append((hash, number)) }
             }
             for domain in parsed.allowDomains {
-                listAllowHashes.insert(FNV1a.hash64(domain))
+                let hash = FNV1a.hash64(domain)
+                if listAllowHashes.insert(hash).inserted { listAllowEntries.append((hash, number)) }
             }
         }
 
-        // List-level @@ allows are exact-hash subtractions; user allows stay
-        // separate so the tunnel can honor suffix-level allows at runtime.
-        blockHashes.subtract(listAllowHashes)
+        // List-level @@ exceptions are no longer subtracted here: they are
+        // written to listallow.bin and applied at lookup time.
 
         let userAllowHashes = normalizeToHashes(state.userAllowlist)
         let userDenyHashes = normalizeToHashes(state.userDenylist)
 
         state.generation &+= 1
         state.compiledSeedVersion = SeedRules.version
+        state.compiledFormatVersion = CompiledBlocklist.formatVersion
         let generation = state.generation
 
-        try CompiledBlocklist.write(hashes: blockHashes, generation: generation, to: paths.blocklistURL)
+        // blocklist.bin goes last: the tunnel keys reloads off its generation,
+        // so the exceptions and user blobs must already be on disk.
+        try CompiledBlocklist.serialize(entries: listAllowEntries, generation: generation)
+            .write(to: paths.listAllowlistURL, options: CompiledBlocklist.writingOptions)
         try CompiledBlocklist.write(hashes: userAllowHashes, generation: generation, to: paths.userAllowlistURL)
         try CompiledBlocklist.write(hashes: userDenyHashes, generation: generation, to: paths.userDenylistURL)
+        try CompiledBlocklist.serialize(entries: blockEntries, generation: generation)
+            .write(to: paths.blocklistURL, options: CompiledBlocklist.writingOptions)
 
-        // Only after all three blobs are on disk, so the tunnel never reloads
+        // Only after all four blobs are on disk, so the tunnel never reloads
         // a half-written set.
         postSignal(.blocklistChanged)
 
@@ -80,6 +92,8 @@ public enum BlocklistCompiler {
         stats.userAllowEntryCount = userAllowHashes.count
         stats.userDenyEntryCount = userDenyHashes.count
         stats.generation = generation
+        let numbered = state.sourceNumbers?.values.filter { $0 != 0 }.count ?? 0
+        log.info("compiled v2: \(stats.blockedEntryCount) blocked, \(stats.listAllowEntryCount) list exceptions, \(numbered) sources numbered")
         return stats
     }
 
