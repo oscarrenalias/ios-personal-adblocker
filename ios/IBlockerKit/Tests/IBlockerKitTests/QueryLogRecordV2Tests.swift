@@ -40,7 +40,7 @@ final class QueryLogRecordV2Tests: XCTestCase {
     func testUnknownRouteWithDetailsBitDecodesAsNil() {
         var bytes = QueryLogRecord(timestampMillis: 5, qtype: 1, verdict: .allowed, domain: "a.example.com",
                                    details: QueryLogDetails()).encoded()
-        for raw: UInt8 in 5...7 {
+        for raw: UInt8 in 6...7 {
             bytes[13] = 0x80 | raw << 1
             XCTAssertNil(QueryLogRecord.decode(bytes[...]), "route \(raw)")
         }
