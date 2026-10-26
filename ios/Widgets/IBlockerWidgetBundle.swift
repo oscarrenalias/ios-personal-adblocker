@@ -10,7 +10,6 @@ struct IBlockerWidgetBundle: WidgetBundle {
             Pause5Control()
             Pause10Control()
             Pause30Control()
-            Pause60Control()
         }
     }
 }

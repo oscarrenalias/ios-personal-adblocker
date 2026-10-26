@@ -177,9 +177,11 @@ Profiles were **dropped** on 2026-10-25 to keep things simple.
 - A Control Center toggle (`ProtectionControl`).
 - Shortcuts: enable, disable, pause (5, 15 or 60 min), resume, update lists.
 
-- Control Center pause buttons for 5, 10, 30 and 60 min (`PauseControl`,
+- Control Center pause buttons for 5, 10 and 30 min (`PauseControl`,
   `PauseIntent` in `ios/Widgets/PauseControls.swift`), registered in the widget
-  bundle. They set `SharedSettings.pausedUntil` through `PauseDeadline`.
+  bundle, using the system numbered symbols (`5.circle` etc.). They set
+  `SharedSettings.pausedUntil` through `PauseDeadline`. Custom symbols rendered
+  blank in Control Center, and the 60 min button is deferred.
   Still to confirm by hand on an iOS 18 device.
 
 **Missing:**
