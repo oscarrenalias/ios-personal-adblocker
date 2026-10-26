@@ -17,7 +17,7 @@ from the logs alone.
 - **Subsystem:** `net.renalias.adblocker`, the same for every target, so one filter
   shows everything.
 - **Category:** the component, for example `tunnel`, `engine`, `upstream`,
-  `network-dns`, `path`, `lists`, `settings`, `ui`.
+  `network-dns`, `path`, `lists`, `settings`, `ui`, `notify`.
 - Log through the small `os.Logger` wrapper `Log`
   (`IBlockerKit/Shared/Log.swift`). Create one per component with
   `Log(category: "engine")` and call `error`, `notice`, `info` or `debug`.
@@ -62,6 +62,18 @@ path changes) using the same wrapper.
 - Resolver names and URLs (Cloudflare, `https://1.1.1.1/dns-query`) and
   interface names (`en0`, `pdp_ip0`) aren't personal. Log them `.public` at
   any level.
+
+### The `notify` category
+
+Status notifications (policy, poster, tunnel and app triggers) log under
+`notify`. Kinds, delays and errors only, never domain names or URLs.
+
+| Level | Events |
+|---|---|
+| `notice` | `scheduled <kind> in N s`; `posted restored for <kind>`; `authorization requested: granted/denied`; `stop classified expected/unexpected: reason <name>, user-off marker set/clear` |
+| `info` | `suppressed <kind>: <reason>` (master off, type disabled, rate-limited, already notified this episode, not authorized); `cancelled pending <kind> (cleared after N s)`; `notification tap: kind, tab`; `tunnel-gone check: <result>`; `<kind> episode ended (list <id>)` |
+| `error` | `authorization request failed`; `add failed for <kind>` |
+| `debug` | policy trace (inputs and outcome of each decision), `no problem/restore content for <kind>`, deferred degraded notification, `list-rejected not notified: user-triggered run` |
 
 ## Reading the logs
 
