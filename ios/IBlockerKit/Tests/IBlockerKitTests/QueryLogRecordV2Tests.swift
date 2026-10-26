@@ -4,7 +4,7 @@ import XCTest
 final class QueryLogRecordV2Tests: XCTestCase {
 
     func testV2RoundTripForEveryRoute() throws {
-        let routes: [LogRoute] = [.alternative, .network, .networkOnlyName, .fallback, .local]
+        let routes: [LogRoute] = [.unknown, .alternative, .network, .networkOnlyName, .fallback, .local]
         for route in routes {
             for cache in [false, true] {
                 let record = QueryLogRecord(

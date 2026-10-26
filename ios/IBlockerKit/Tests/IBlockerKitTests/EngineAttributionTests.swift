@@ -71,7 +71,7 @@ final class EngineAttributionTests: XCTestCase {
         XCTAssertEqual(r.details?.sourceNumber, 3)
         XCTAssertEqual(r.details?.matchedLabels, 3)
         XCTAssertEqual(r.details?.cacheHit, false)
-        XCTAssertEqual(r.details?.route.rawValue, 0)
+        XCTAssertEqual(r.details?.route, .unknown)
         XCTAssertEqual(upstream.calls, 0)
     }
 
@@ -127,7 +127,7 @@ final class EngineAttributionTests: XCTestCase {
         r = try await lastRecord(engine)
         XCTAssertEqual(upstream.calls, 1)
         XCTAssertEqual(r.details?.cacheHit, true)
-        XCTAssertEqual(r.details?.route.rawValue, 0)
+        XCTAssertEqual(r.details?.route, .unknown)
         XCTAssertEqual(r.verdict, .allowed)
     }
 
@@ -159,7 +159,7 @@ final class EngineAttributionTests: XCTestCase {
         await send(engine, "fail.example.org")
         let r = try await lastRecord(engine)
         XCTAssertEqual(r.verdict, .failed)
-        XCTAssertEqual(r.details?.route.rawValue, 0)
+        XCTAssertEqual(r.details?.route, .unknown)
     }
 
     func testInFlightLimitFailure() async throws {
@@ -168,7 +168,7 @@ final class EngineAttributionTests: XCTestCase {
         await send(engine, "busy.example.org")
         let r = try await lastRecord(engine)
         XCTAssertEqual(r.verdict, .failed)
-        XCTAssertEqual(r.details?.route.rawValue, 0)
+        XCTAssertEqual(r.details?.route, .unknown)
         XCTAssertEqual(r.details?.cacheHit, false)
         XCTAssertEqual(upstream.calls, 0)
     }

@@ -8,11 +8,12 @@ public enum LogVerdict: UInt8, Sendable, Codable {
 
 /// Route that served a query, as stored in the record flags (bits 1-3).
 public enum LogRoute: UInt8, Sendable, Equatable {
-    case alternative = 0
-    case network = 1
-    case networkOnlyName = 2
-    case fallback = 3
-    case local = 4
+    case unknown = 0
+    case alternative = 1
+    case network = 2
+    case networkOnlyName = 3
+    case fallback = 4
+    case local = 5
 }
 
 /// v2 detail fields. Absent on v1 records (flags bit 7 clear).

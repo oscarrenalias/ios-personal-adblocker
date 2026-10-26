@@ -66,6 +66,7 @@ final class DecisionExplanationPresentationTests: XCTestCase {
             DecisionExplanationPresentation(record: record(.allowed, source: 1, cache: cache, route: route), state: state()).routeLine
         }
         XCTAssertEqual(line(true, .fallback), "Answered from cache")
+        XCTAssertNil(line(false, .unknown))
         XCTAssertEqual(line(false, .alternative), "Encrypted DNS")
         XCTAssertEqual(line(false, .network), "Network DNS")
         XCTAssertEqual(line(false, .networkOnlyName), "Network DNS (name always sent to your network)")

@@ -199,9 +199,10 @@ public struct DecisionExplanationPresentation: Equatable, Sendable {
         return parts.suffix(labels).joined(separator: ".")
     }
 
-    private static func routeLine(cacheHit: Bool, route: LogRoute) -> String {
+    private static func routeLine(cacheHit: Bool, route: LogRoute) -> String? {
         if cacheHit { return "Answered from cache" }
         switch route {
+        case .unknown: return nil
         case .alternative: return "Encrypted DNS"
         case .network: return "Network DNS"
         case .networkOnlyName: return "Network DNS (name always sent to your network)"
