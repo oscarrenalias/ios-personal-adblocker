@@ -166,6 +166,9 @@ public enum StatusNotificationEvent: Sendable, Equatable {
     case problemStarted(StatusNotificationKind)
     /// The problem of this kind cleared (restore trigger for 1, 2, 3, 7).
     case problemCleared(StatusNotificationKind)
+    /// The problem of this kind ended without a restore (e.g. the alternative
+    /// resolver was turned off): drop a pending request, post nothing.
+    case problemDismissed(StatusNotificationKind)
     /// `stopTunnel` ran: pending 1, 2, 6 and 7 end silently.
     case tunnelStopped
     /// The tunnel saw a pause deadline (`nil` when no pause is active).
@@ -293,6 +296,8 @@ extension StatusNotificationPolicy {
         switch event {
         case .problemStarted(let kind): problemStarted(kind, &d, preferences, now)
         case .problemCleared(let kind): problemCleared(kind, &d, preferences, now)
+        case .problemDismissed(let kind):
+            if d.state.episode(kind).isOpen { endSilently(kind, &d, now, reason: "dismissed") }
         case .tunnelStopped: tunnelStopped(&d, now)
         case .pauseDeadline(let date): pauseDeadline(date, &d, preferences, now)
         case .oneShot(let kind): oneShot(kind, &d, preferences, now)
@@ -365,12 +370,10 @@ extension StatusNotificationPolicy {
             d.suppressions.append(.init(kind: .restored, reason: reason))
             return
         }
-        let restoreFire = now
-        if rateLimited(.restored, fire: restoreFire, state: d.state) {
-            d.suppressions.append(.init(kind: .restored, reason: .rateLimited))
-            return
-        }
-        record(restoreFire, for: .restored, &d.state, now: now)
+        // Restores are not rate limited: one only follows a delivered problem,
+        // and problems are rate limited per kind, so restores are bounded.
+        // A shared limit would let one kind's restore suppress another's and
+        // leave a stale problem notification behind.
         d.actions.append(.postRestore(forKind: kind))
     }
 

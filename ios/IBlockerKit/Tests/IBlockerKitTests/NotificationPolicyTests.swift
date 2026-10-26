@@ -111,22 +111,37 @@ final class NotificationPolicyTests: XCTestCase {
         XCTAssertTrue(d.state.times(.resolverFallback).isEmpty)
     }
 
-    func testClearAfterFireTimePostsRestoreAndRateLimitsRestore() {
+    func testClearAfterFireTimePostsRestoreWithoutRateLimit() {
         let start = decide(.problemStarted(.resolverFallback))
         let later = t0.addingTimeInterval(45)
         let d = decide(.problemCleared(.resolverFallback), start.state, at: later)
         XCTAssertEqual(d.actions, [.postRestore(forKind: .resolverFallback)])
         XCTAssertFalse(d.state.episode(.resolverFallback).isOpen)
-        XCTAssertEqual(d.state.times(.restored), [later])
+        XCTAssertTrue(d.state.times(.restored).isEmpty)
+    }
 
-        // Second episode clears within 5 min of the previous restore: no restore.
-        let again = decide(.problemStarted(.resolverFallback), d.state, at: later.addingTimeInterval(1))
-        // Fire time for the problem itself is also rate-limited by the earlier one (<5 min), so open it manually.
-        var s = again.state
-        s.episodes[.resolverFallback] = .init(isOpen: true, scheduledFireTime: later.addingTimeInterval(10), notified: false)
-        let second = decide(.problemCleared(.resolverFallback), s, at: later.addingTimeInterval(60))
-        XCTAssertTrue(second.actions.isEmpty)
-        XCTAssertEqual(second.suppressions.map(\.reason), [.rateLimited])
+    func testRestoreOfOneKindDoesNotSuppressRestoreOfAnother() {
+        let dns = decide(.problemStarted(.resolverFallback))
+        let stopped = decide(.problemStarted(.protectionStopped), dns.state, at: t0.addingTimeInterval(1))
+        let r1 = decide(.problemCleared(.resolverFallback), stopped.state, at: t0.addingTimeInterval(100))
+        XCTAssertEqual(r1.actions, [.postRestore(forKind: .resolverFallback)])
+        let r2 = decide(.problemCleared(.protectionStopped), r1.state, at: t0.addingTimeInterval(220))
+        XCTAssertEqual(r2.actions, [.postRestore(forKind: .protectionStopped)])
+        XCTAssertTrue(r2.suppressions.isEmpty)
+    }
+
+    func testDismissedPendingEpisodeCancelsWithoutRestore() {
+        let start = decide(.problemStarted(.resolverFallback))
+        let d = decide(.problemDismissed(.resolverFallback), start.state, at: t0.addingTimeInterval(10))
+        XCTAssertEqual(d.actions, [.cancel(.resolverFallback, clearedAfter: 10)])
+        XCTAssertFalse(d.state.episode(.resolverFallback).isOpen)
+    }
+
+    func testDismissedDeliveredEpisodeEndsWithoutRestore() {
+        let start = decide(.problemStarted(.resolverFailing))
+        let d = decide(.problemDismissed(.resolverFailing), start.state, at: t0.addingTimeInterval(60))
+        XCTAssertTrue(d.actions.isEmpty)
+        XCTAssertFalse(d.state.episode(.resolverFailing).isOpen)
     }
 
     func testClearWithoutOpenEpisodeIsNoOp() {
