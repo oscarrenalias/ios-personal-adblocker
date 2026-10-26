@@ -14,11 +14,7 @@ struct PauseControl {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: kind) {
             ControlWidgetButton(action: PauseIntent(minutes: minutes)) {
-                Label {
-                    Text("Pause \(minutes) min")
-                } icon: {
-                    Image("pause.\(minutes)")
-                }
+                Label("Pause \(minutes) min", systemImage: "\(minutes).circle")
             }
             .tint(.orange)
         }
@@ -45,13 +41,6 @@ struct Pause10Control: ControlWidget {
 struct Pause30Control: ControlWidget {
     var body: some ControlWidgetConfiguration {
         PauseControl(kind: WidgetKinds.pause30Control, minutes: 30).body
-    }
-}
-
-@available(iOS 18.0, *)
-struct Pause60Control: ControlWidget {
-    var body: some ControlWidgetConfiguration {
-        PauseControl(kind: WidgetKinds.pause60Control, minutes: 60).body
     }
 }
 
