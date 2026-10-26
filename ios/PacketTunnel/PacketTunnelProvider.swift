@@ -2,6 +2,7 @@ import Network
 import NetworkExtension
 import os
 import UserNotifications
+import WidgetKit
 import IBlockerKit
 import IBlockerTunnelKit
 
@@ -40,6 +41,45 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private let notifier = StatusNotifier()
     /// Bumped by every `makeRouter`; callbacks from older routers are dropped.
     private let routerGeneration = LockedBox(0)
+    /// Last (state, name) the widget was told about. Guards the write, the
+    /// gate decision and the reload so concurrent publishes can't interleave.
+    private let widgetPublished = LockedBox<WidgetReloadGate.Published?>(nil)
+
+    /// Mirrors `status` into the shared settings and reloads the widget
+    /// timeline only when the gate says the visible line changed.
+    private func publishWidgetStatus(_ status: ResolverStatus?) {
+        guard let settings = AppGroupPaths.groupID(from: Bundle.main).flatMap({ SharedSettings(groupID: $0) }) else {
+            Self.log.error("widget resolver status not published: app group unavailable")
+            return
+        }
+        widgetPublished.withValue { last in
+            do {
+                try settings.writeWidgetResolverStatus(status)
+            } catch {
+                Self.log.error("widget resolver status write failed: \(error)")
+                return
+            }
+            let decision = WidgetReloadGate.evaluate(last: last, status: status)
+            last = decision.published
+            let state = decision.published.state
+            guard decision.shouldReload else {
+                Self.log.debug("widget resolver status unchanged (\(state)), no reload")
+                return
+            }
+            Self.log.info("widget resolver status: \(state) (\(decision.published.name ?? "none"))")
+            Self.reloadWidget(reason: "change")
+        }
+    }
+
+    /// Unconditional reload for tunnel start and stop.
+    private func reloadWidget(reason: String) {
+        widgetPublished.withValue { _ in Self.reloadWidget(reason: reason) }
+    }
+
+    private static func reloadWidget(reason: String) {
+        log.debug("widget reload requested (\(reason))")
+        WidgetCenter.shared.reloadTimelines(ofKind: WidgetKinds.statusWidget)
+    }
 
     /// Drives status notification events 1-4, 6 and 7 through the policy and poster.
     /// An actor so router callbacks, IPC and start/stop don't interleave
