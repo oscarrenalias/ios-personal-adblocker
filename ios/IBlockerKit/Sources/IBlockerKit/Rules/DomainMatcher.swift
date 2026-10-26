@@ -41,66 +41,126 @@ public struct DomainMatcher: Sendable {
 
     public var blockedEntryCount: Int { (blocklist?.count ?? 0) + builtInBlockHashes.count }
 
-    /// Which tier decided a lookup.
-    enum MatchTier: Sendable, Equatable {
-        case userAllow, userDeny, builtIn, listException, blocklist
+    /// Which set a match came from.
+    public enum MatchSource: Equatable, Sendable {
+        case userAllowlist, userDenylist, builtIn
+        case listException(sourceNumber: UInt8)   // 0 = unknown list
+        case list(sourceNumber: UInt8)            // 0 = unknown list
     }
 
-    /// Result of a single precedence walk: the deciding tier, the number of
-    /// labels in the matching suffix, and the blocklist source number (only
-    /// for `.blocklist` hits).
-    struct Match: Sendable, Equatable {
-        let tier: MatchTier
+    /// A match in one set, with the suffix of the name that hit.
+    public struct Match: Equatable, Sendable {
+        public let source: MatchSource
+        public let matchedSuffix: String
+    }
+
+    public struct Explanation: Equatable, Sendable {
+        public let verdict: Verdict
+        /// nil when `verdict == .none`.
+        public let decidingMatch: Match?
+    }
+
+    /// Result of a single precedence walk. Records only the label count of
+    /// the matching suffix; the suffix string is built on demand.
+    struct Hit: Sendable, Equatable {
+        let source: MatchSource
         let matchedLabelCount: Int
-        let source: UInt8?
 
         var verdict: Verdict {
-            switch tier {
-            case .userAllow, .listException: return .allow
-            case .userDeny, .builtIn, .blocklist: return .block
+            switch source {
+            case .userAllowlist, .listException: return .allow
+            case .userDenylist, .builtIn, .list: return .block
             }
         }
     }
 
     public func verdict(for domain: String) -> Verdict {
-        Self.verdict(of: match(for: domain))
+        explain(domain).verdict
     }
 
-    private static func verdict(of match: Match?) -> Verdict {
-        match?.verdict ?? .none
+    /// Verdict plus the deciding match, from the same lookup as `verdict(for:)`.
+    public func explain(_ domain: String) -> Explanation {
+        guard let hit = hit(for: domain) else {
+            return Explanation(verdict: .none, decidingMatch: nil)
+        }
+        return Explanation(verdict: hit.verdict,
+                           decidingMatch: Match(source: hit.source,
+                                                matchedSuffix: Self.suffix(of: domain, labelCount: hit.matchedLabelCount)))
+    }
+
+    /// Every match in every set, in precedence order; within a set the most
+    /// specific suffix comes first.
+    public func allMatches(for domain: String) -> [Match] {
+        let hashes = Self.suffixHashes(of: domain)
+        guard !hashes.isEmpty else { return [] }
+        let labelBase = hashes.count + 1
+        var result: [Match] = []
+
+        func collect(_ source: (Int) -> MatchSource?) {
+            for i in hashes.indices {
+                if let found = source(i) {
+                    result.append(Match(source: found,
+                                        matchedSuffix: Self.suffix(of: domain, labelCount: labelBase - i)))
+                }
+            }
+        }
+        if let allow = userAllowlist, !allow.isEmpty {
+            collect { allow.contains(hashes[$0]) ? .userAllowlist : nil }
+        }
+        if let deny = userDenylist, !deny.isEmpty {
+            collect { deny.contains(hashes[$0]) ? .userDenylist : nil }
+        }
+        if !builtInBlockHashes.isEmpty {
+            collect { builtInBlockHashes.contains(hashes[$0]) ? .builtIn : nil }
+        }
+        if let exceptions = listAllowlist, !exceptions.isEmpty {
+            collect { exceptions.lookup(hashes[$0]).map { .listException(sourceNumber: $0) } }
+        }
+        if let block = blocklist, !block.isEmpty {
+            collect { block.lookup(hashes[$0]).map { .list(sourceNumber: $0) } }
+        }
+        return result
+    }
+
+    /// The last `labelCount` labels of `domain`.
+    private static func suffix(of domain: String, labelCount: Int) -> String {
+        let labels = domain.split(separator: ".", omittingEmptySubsequences: false)
+        return labels.suffix(labelCount).joined(separator: ".")
     }
 
     /// Single walk over the suffix hashes in precedence order. Hashes are
     /// most-specific first, so index `i` has `hashes.count + 1 - i` labels.
-    func match(for domain: String) -> Match? {
+    func hit(for domain: String) -> Hit? {
         let hashes = Self.suffixHashes(of: domain)
         guard !hashes.isEmpty else { return nil }
         let labelBase = hashes.count + 1
 
         if let allow = userAllowlist, !allow.isEmpty {
             for (i, hash) in hashes.enumerated() where allow.contains(hash) {
-                return Match(tier: .userAllow, matchedLabelCount: labelBase - i, source: nil)
+                return Hit(source: .userAllowlist, matchedLabelCount: labelBase - i)
             }
         }
         if let deny = userDenylist, !deny.isEmpty {
             for (i, hash) in hashes.enumerated() where deny.contains(hash) {
-                return Match(tier: .userDeny, matchedLabelCount: labelBase - i, source: nil)
+                return Hit(source: .userDenylist, matchedLabelCount: labelBase - i)
             }
         }
         if !builtInBlockHashes.isEmpty {
             for (i, hash) in hashes.enumerated() where builtInBlockHashes.contains(hash) {
-                return Match(tier: .builtIn, matchedLabelCount: labelBase - i, source: nil)
+                return Hit(source: .builtIn, matchedLabelCount: labelBase - i)
             }
         }
         if let exceptions = listAllowlist, !exceptions.isEmpty {
-            for (i, hash) in hashes.enumerated() where exceptions.contains(hash) {
-                return Match(tier: .listException, matchedLabelCount: labelBase - i, source: nil)
+            for (i, hash) in hashes.enumerated() {
+                if let number = exceptions.lookup(hash) {
+                    return Hit(source: .listException(sourceNumber: number), matchedLabelCount: labelBase - i)
+                }
             }
         }
         if let block = blocklist, !block.isEmpty {
             for (i, hash) in hashes.enumerated() {
-                if let source = block.lookup(hash) {
-                    return Match(tier: .blocklist, matchedLabelCount: labelBase - i, source: source)
+                if let number = block.lookup(hash) {
+                    return Hit(source: .list(sourceNumber: number), matchedLabelCount: labelBase - i)
                 }
             }
         }
