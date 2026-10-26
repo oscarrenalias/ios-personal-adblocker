@@ -16,7 +16,7 @@ worth knowing.
 1. [x] [KI-1](#ki-1-no-fallback-when-the-dns-resolver-is-unreachable) Resolver fallback and captive Wi-Fi
 2. [x] [KI-2](#ki-2-lookups-with-large-answers-fail) Large DNS answers
 3. [ ] [KI-3](#ki-3-apple-relay-handling-is-switched-off-docs-say-otherwise) Apple relay: test on device, then fix code or docs
-4. [ ] [KI-4](#ki-4-tunnel-wakes-up-every-2-seconds) Battery: 2-second wake-ups
+4. [x] [KI-4](#ki-4-tunnel-wakes-up-every-2-seconds) Battery: 2-second wake-ups (fixed: 60 s idle timer plus Darwin signals)
 5. [x] [KI-5](#ki-5-background-list-refresh-probably-never-runs) Background refresh
 6. [ ] [KI-6](#ki-6-list-exceptions-cant-unblock-subdomains) List exceptions
 7. [x] [KI-7](#ki-7-pause-and-unblock-take-up-to-5-minutes) Pause/unblock delay (fixed with the DNS cache work)
@@ -116,22 +116,27 @@ either turn the relay handling back on or correct `BLOCKING-MODES.md`.
 
 ### KI-4: Tunnel wakes up every 2 seconds
 
-- **Status:** open, partly addressed: the DNS cache (KI-9) answers repeat
-  lookups inside the tunnel, so fewer queries reach the resolver. The
-  2-second maintenance loop is unchanged.
+- **Status:** fixed. The maintenance loop now sleeps 60 s when idle and only
+  runs every 2 s while the tunnel is degraded (started before first unlock).
+  Settings and blocklist changes wake it at once through Darwin signals, and
+  the app asks the tunnel to flush the query log over IPC while a log view is
+  visible. The DNS cache (KI-9) also cuts the queries that reach the resolver.
+  Battery effect not measured on a device yet.
 - **Where:** `ios/PacketTunnel/PacketTunnelProvider.swift` (`startMaintenance`),
-  `DNSProxyEngine.flush`
+  `ios/IBlockerKit/Sources/IBlockerKit/Shared/MaintenanceSchedule.swift`,
+  `TunnelSignal.swift`, `DNSProxyEngine.flush`
 
-The maintenance loop runs every 2 seconds, even when idle. Each tick it:
+The old loop ran every 2 seconds, even when idle. Each tick it rewrote
+`stats.json`, re-read shared settings and, every 5th tick, re-opened the
+blocklist file.
 
-- rewrites `stats.json`
-- re-reads shared settings
-- every 5th tick, re-opens the blocklist file
-
-This polling probably drains the battery. Not measured yet.
-
-**Fix ideas:** only write stats when they've changed, flush less often, and
-react to events (app IPC messages, Darwin notifications) instead of polling.
+**Fix:** `MaintenanceSchedule` plans each pass. Timer passes run every 60 s
+when idle (flush, settings, blocklist check) and every 2 s when degraded
+(blocklist check every 5th tick). `SharedSettings` posts `settingsChanged`
+and `BlocklistCompiler` posts `blocklistChanged`; the tunnel runs just the
+matching step. A pending verbose-logging expiry shortens the next wake so
+the flag turns off promptly. See
+[ARCHITECTURE.md](ARCHITECTURE.md#data-flow-between-app-and-tunnel).
 
 ### KI-5: Background list refresh probably never runs
 

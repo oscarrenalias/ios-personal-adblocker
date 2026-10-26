@@ -43,6 +43,21 @@ extension EnvironmentValues {
     }
 }
 
+/// Rate limiter for the query-log flush hook.
+@MainActor
+private final class FlushThrottle {
+    private let interval: TimeInterval
+    private var last: Date = .distantPast
+
+    init(interval: TimeInterval) { self.interval = interval }
+
+    func shouldFire(now: Date = Date()) -> Bool {
+        guard now.timeIntervalSince(last) >= interval else { return false }
+        last = now
+        return true
+    }
+}
+
 public struct RootView: View {
     @State private var selectedTab: RootTab = .dashboard
     @State private var tunnel = TunnelController()
@@ -88,6 +103,13 @@ public struct RootView: View {
         .task {
             lists.onRulesChanged = { [weak tunnel] in
                 await tunnel?.reloadRules()
+            }
+            // Polling runs at 1 Hz; ask the tunnel to flush at most every 2 s.
+            // flushQueryLog is itself a no-op when not connected.
+            let throttle = FlushThrottle(interval: 2)
+            log.flushHook = { [weak tunnel] in
+                guard throttle.shouldFire() else { return }
+                await tunnel?.flushQueryLog()
             }
             await lists.ensureFreshCompile()
         }

@@ -18,33 +18,49 @@ public final class QueryLogViewModel {
     public var searchText = ""
     public var filter: Filter = .all
 
+    /// Optional hook awaited before each poll reads the ring (e.g. to ask the
+    /// extension to flush pending records). Polling works without it.
+    public var flushHook: (@MainActor () async -> Void)?
+
     private let reader: QueryLogRingReader
     private var cursor: UInt64 = 0
     private var pollTask: Task<Void, Never>?
+    private var activePollers = 0
     private let maxRecords = 4000
 
     public init(paths: AppGroupPaths) {
         self.reader = QueryLogRingReader(url: paths.queryLogURL)
-        poll()
+        readRing()
     }
 
-    /// 1 Hz polling, only while the Log tab is visible.
+    /// 1 Hz polling while at least one view (Log tab, dashboard chart) is
+    /// visible. Calls are reference-counted; pair each with `stopPolling()`.
     public func startPolling() {
+        activePollers += 1
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                self?.poll()
+                await self?.poll()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
     }
 
     public func stopPolling() {
+        guard activePollers > 0 else { return }
+        activePollers -= 1
+        guard activePollers == 0 else { return }
         pollTask?.cancel()
         pollTask = nil
     }
 
-    private func poll() {
+    /// Awaits the flush hook (if any), then reads new records from the ring.
+    public func poll() async {
+        if let flushHook { await flushHook() }
+        readRing()
+    }
+
+    private func readRing() {
         let (new, newCursor) = reader.read(since: cursor)
         guard newCursor != cursor else { return }
         cursor = newCursor

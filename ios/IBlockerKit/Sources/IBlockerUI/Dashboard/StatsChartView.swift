@@ -5,6 +5,10 @@ import IBlockerKit
 
 /// Blocked-per-hour bars for today plus the top blocked domains, computed
 /// from the query-log window.
+///
+/// Polling follows visibility: the view calls `startPolling()` on the shared
+/// `QueryLogViewModel` when it appears and `stopPolling()` when it disappears,
+/// so the log is not refreshed while the chart is off screen.
 public struct StatsChartView: View {
     @Environment(QueryLogViewModel.self) private var log
 
@@ -67,6 +71,7 @@ public struct StatsChartView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal)
         .onAppear { log.startPolling() }
+        .onDisappear { log.stopPolling() }
     }
 }
 #endif

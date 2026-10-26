@@ -189,16 +189,34 @@ Everything shared lives in the App Group container:
 | File | Writer | Reader |
 |---|---|---|
 | `blocklist.bin`, `allowlist.bin`, `denylist.bin` | app (compiler) | tunnel (mmap) |
-| `querylog.ring` (4 MB fixed ring, 64 B records) | tunnel | app (1 Hz tail) |
-| `stats.json` | tunnel (2 s cadence) | app (fallback when tunnel unreachable) |
+| `querylog.ring` (4 MB fixed ring, 64 B records) | tunnel | app (1 Hz tail while a log or chart view is visible) |
+| `stats.json` | tunnel (flushed on each maintenance timer pass: 60 s idle, 2 s degraded) | app (fallback when tunnel unreachable) |
 | `sources.json` | app (via `FilterListStore`) | app |
 | `contentblocker.json` | app | Safari extension |
 | shared `UserDefaults` | app | tunnel (resolver settings, log toggle) |
 
 Control channel: `sendProviderMessage` with JSON-coded `TunnelRequest`
-(`reloadRules`, `getStats`, `setResolverSettings`, `clearDNSCache`, `ping`). Fallback: the tunnel
-polls the blocklist generation number every 10 s, so rule updates land even
-if the app is killed before the IPC message.
+(`reloadRules`, `getStats`, `setResolverSettings`, `clearDNSCache`, `flushLog`, `ping`). While a
+log or chart view is visible, the app sends `flushLog` before each 1 Hz ring
+read so recent records are in the ring.
+
+**Maintenance loop.** The tunnel has no fixed 2 s loop. One task
+(`startMaintenance`, planned by `Shared/MaintenanceSchedule.swift`) sleeps until
+the next timer deadline or a Darwin signal (`Shared/TunnelSignal.swift`),
+then runs one pass; signals that arrive during a pass coalesce into one
+follow-up pass.
+
+- Timer passes: every 60 s when idle (flush, re-read settings, blocklist
+  generation check); every 2 s while degraded (adds recovery retries; the
+  blocklist check runs every 5th tick).
+- `settingsChanged` (posted by `SharedSettings` on writes): runs the settings
+  step (pause deadline, verbose flag) and recovery if degraded.
+- `blocklistChanged` (posted by `BlocklistCompiler` after a compile): runs the
+  blocklist generation check. This replaces the old 10 s poll, so rule
+  updates land even if the app is killed before the IPC message; the 60 s
+  timer pass is the backstop if a signal is missed.
+- A pending verbose-logging expiry shortens the next wake to just past the
+  expiry. Changing between degraded and idle recomputes the deadline.
 
 ## Notifications
 
