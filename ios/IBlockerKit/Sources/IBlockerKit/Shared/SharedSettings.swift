@@ -224,6 +224,7 @@ public struct SharedSettings: @unchecked Sendable {
         }
         nonmutating set {
             defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: Keys.pausedUntil)
+            TunnelSignal.post(.settingsChanged)
         }
     }
 
@@ -239,6 +240,7 @@ public struct SharedSettings: @unchecked Sendable {
         }
         nonmutating set {
             defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: Keys.verboseLoggingUntil)
+            TunnelSignal.post(.settingsChanged)
         }
     }
 

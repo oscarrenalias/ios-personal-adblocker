@@ -17,7 +17,11 @@ public struct CompileStats: Sendable, Equatable {
 public enum BlocklistCompiler {
 
     @discardableResult
-    public static func compile(state: inout FilterListState, paths: AppGroupPaths) throws -> CompileStats {
+    public static func compile(
+        state: inout FilterListState,
+        paths: AppGroupPaths,
+        postSignal: (TunnelSignal) -> Void = TunnelSignal.post
+    ) throws -> CompileStats {
         var stats = CompileStats()
         var blockHashes = Set<UInt64>()
         var listAllowHashes = Set<UInt64>()
@@ -64,6 +68,10 @@ public enum BlocklistCompiler {
         try CompiledBlocklist.write(hashes: blockHashes, generation: generation, to: paths.blocklistURL)
         try CompiledBlocklist.write(hashes: userAllowHashes, generation: generation, to: paths.userAllowlistURL)
         try CompiledBlocklist.write(hashes: userDenyHashes, generation: generation, to: paths.userDenylistURL)
+
+        // Only after all three blobs are on disk, so the tunnel never reloads
+        // a half-written set.
+        postSignal(.blocklistChanged)
 
         stats.blockedEntryCount = blockHashes.count
         stats.listAllowEntryCount = listAllowHashes.count

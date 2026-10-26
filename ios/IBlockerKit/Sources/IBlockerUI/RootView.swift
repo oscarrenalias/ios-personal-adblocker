@@ -89,6 +89,13 @@ public struct RootView: View {
             lists.onRulesChanged = { [weak tunnel] in
                 await tunnel?.reloadRules()
             }
+            // Polling runs at 1 Hz; ask the tunnel to flush at most every 2 s.
+            // flushQueryLog is itself a no-op when not connected.
+            let throttle = FlushThrottle(interval: 2)
+            log.flushHook = { [weak tunnel] in
+                guard throttle.shouldFire() else { return }
+                await tunnel?.flushQueryLog()
+            }
             await lists.ensureFreshCompile()
         }
         .onChange(of: router.pendingTab, initial: true) {
