@@ -25,7 +25,8 @@ public final class QueryLogViewModel {
     private let reader: QueryLogRingReader
     private var cursor: UInt64 = 0
     private var pollTask: Task<Void, Never>?
-    private var activePollers = 0
+    private var gate = PollingGate()
+    private static let uiLog = Log(category: "ui")
     private let maxRecords = 4000
 
     public init(paths: AppGroupPaths) {
@@ -34,24 +35,45 @@ public final class QueryLogViewModel {
     }
 
     /// 1 Hz polling while at least one view (Log tab, dashboard chart) is
-    /// visible. Calls are reference-counted; pair each with `stopPolling()`.
+    /// visible and the scene is active. Calls are reference-counted; pair each
+    /// with `stopPolling()`.
     public func startPolling() {
-        activePollers += 1
-        guard pollTask == nil else { return }
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.poll()
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
-        }
+        gate.register()
+        syncPollTask()
     }
 
     public func stopPolling() {
-        guard activePollers > 0 else { return }
-        activePollers -= 1
-        guard activePollers == 0 else { return }
-        pollTask?.cancel()
-        pollTask = nil
+        gate.unregister()
+        syncPollTask()
+    }
+
+    /// Suspends polling (and the tunnel flush IPC it triggers) while the scene
+    /// isn't active; resumes when it is, if pollers are still registered.
+    public func setSceneActive(_ active: Bool, phase: String = "") {
+        guard gate.isSceneActive != active else { return }
+        let wasRunning = pollTask != nil
+        gate.setActive(active)
+        syncPollTask()
+        if wasRunning && pollTask == nil {
+            Self.uiLog.debug("polling paused (scene \(phase))")
+        } else if !wasRunning && pollTask != nil {
+            Self.uiLog.debug("polling resumed")
+        }
+    }
+
+    private func syncPollTask() {
+        if gate.shouldRun {
+            guard pollTask == nil else { return }
+            pollTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.poll()
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+            }
+        } else {
+            pollTask?.cancel()
+            pollTask = nil
+        }
     }
 
     /// Awaits the flush hook (if any), then reads new records from the ring.
