@@ -136,6 +136,77 @@ public struct DNSCache: Sendable {
         return slot.entry
     }
 
+    public enum LookupResult: Sendable {
+        /// Rewritten response, ready to send for the query.
+        case hit(Data)
+        case miss
+        /// The query must skip the cache; neither hit nor miss is counted.
+        case bypass
+    }
+
+    /// Looks up `query` and, on a hit, returns the stored response rewritten
+    /// for it: the query's transaction ID and exact question (0x20 case), its
+    /// RD bit, and record TTLs of `max(1, min(recordTTL, entryTTL) - age)`
+    /// (OPT untouched). Expired entries are removed and count as a miss.
+    /// Bypassed queries count as neither.
+    public mutating func lookup(query: DNSQuery) -> LookupResult {
+        let label = "\(query.questionName) \(DNSRecordType.name(query.qtype))"
+        if Self.bypassReason(for: query) != nil { return .bypass }
+        let key = Key(rawQuestion: query.rawQuestion, hasEDNS: query.hasAdditionalRecords)
+        let current = now()
+        guard let slot = slots[key] else {
+            counters.misses += 1
+            Self.log.debug("miss \(label)")
+            return .miss
+        }
+        let entry = slot.entry
+        if entry.isExpired(at: current) {
+            remove(key)
+            counters.misses += 1
+            Self.log.debug("miss \(label): expired")
+            return .miss
+        }
+        let age = entry.age(at: current)
+        guard let rewritten = Self.rewrite(entry: entry, age: age, for: query) else {
+            // Unusable stored bytes: drop them rather than serve garbage.
+            remove(key)
+            counters.misses += 1
+            Self.log.debug("miss \(label): stored response unusable")
+            return .miss
+        }
+        useTick += 1
+        slots[key]?.lastUsed = useTick
+        counters.hits += 1
+        Self.log.debug("hit \(label), ttl left \(Int64(entry.entryTTL) - Int64(age)) s")
+        return .hit(Data(rewritten))
+    }
+
+    private static func rewrite(entry: Entry, age: UInt32, for query: DNSQuery) -> [UInt8]? {
+        var out = entry.response
+        let question = query.rawQuestion
+        guard out.count >= 12 + question.count,
+              let records = try? DNSRecordWalker.walk(out),
+              let nameEnd = try? DNSRecordWalker.skipName(out, at: 12),
+              nameEnd + 4 - 12 == question.count else { return nil }
+
+        out[0] = UInt8(query.transactionID >> 8)
+        out[1] = UInt8(query.transactionID & 0xFF)
+        if query.recursionDesired { out[2] |= 0x01 } else { out[2] &= ~0x01 }
+        out.replaceSubrange(12..<(12 + question.count), with: question)
+
+        for record in records where !record.isOPT {
+            let capped = min(record.ttl, entry.entryTTL)
+            let left = capped > age ? capped - age : 0
+            let ttl = max(1, left)
+            let o = record.ttlOffset
+            out[o] = UInt8(ttl >> 24)
+            out[o + 1] = UInt8((ttl >> 16) & 0xFF)
+            out[o + 2] = UInt8((ttl >> 8) & 0xFF)
+            out[o + 3] = UInt8(ttl & 0xFF)
+        }
+        return out
+    }
+
     /// Stores `response` for `key`, replacing any existing entry, then evicts
     /// least recently used entries until both limits hold. Returns false when
     /// nothing was stored (TTL 0, or the response alone exceeds the byte limit).
