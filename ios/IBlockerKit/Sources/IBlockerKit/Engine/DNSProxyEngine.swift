@@ -15,7 +15,7 @@ public actor DNSProxyEngine {
         public var mtu: Int
         public var logEnabled: Bool
 
-        public init(blockTTL: UInt32 = 300, maxInFlight: Int = 256, mtu: Int = TunnelConstants.mtu,
+        public init(blockTTL: UInt32 = 10, maxInFlight: Int = 256, mtu: Int = TunnelConstants.mtu,
                     logEnabled: Bool = true) {
             self.blockTTL = blockTTL
             self.maxInFlight = maxInFlight
