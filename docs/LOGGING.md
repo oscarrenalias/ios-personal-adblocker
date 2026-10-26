@@ -102,6 +102,21 @@ only at `debug`; `info` and above log counts, sizes and reasons.
 The tunnel also logs `IPC clearDNSCache` (`tunnel`, `info`) and the app logs
 `clearDNSCache requested` (`notice`) or `clearDNSCache failed: ...` (`error`).
 
+### Maintenance and signals
+
+The tunnel's maintenance loop (`tunnel` category) and the Darwin signals
+between app and tunnel (`ipc` category). No domain names.
+
+| Level | Events |
+|---|---|
+| `notice` | `maintenance interval N s (idle)` / `(degraded)`: at start and whenever the interval changes |
+| `info` | `maintenance: N passes (timer N, settings N, blocklist N)`, at most every 10 minutes; `blocklist reloaded: N rules, generation G` with ` (signal)` appended when a signal triggered the check |
+| `error` | `maintenance signal observer failed, timer only: <error>` (the tunnel falls back to timer passes) |
+| `debug` | `signal received: settingsChanged` / `blocklistChanged` (tunnel); `signal posted: <signal name>` (`ipc`, app side); `flushQueryLog requested` / `skipped: tunnel not connected` (`ipc`) |
+
+`flushQueryLog failed: ...` and `ipc <request>: ...` failures are `error` in
+the `ipc` category.
+
 ## Reading the logs
 
 - **Console.app on the Mac:** connect the iPhone, select it in the sidebar,
@@ -150,8 +165,9 @@ logging configuration profile (`com.apple.system.logging`) may be rejected by
 the device. Use the in-app switch instead:
 
 1. Turn on **Settings ▸ Privacy ▸ Verbose logging (1 hour)**. It turns itself
-   off after an hour. The tunnel picks the change up within about 2 s, with
-   no restart.
+   off after an hour. The app posts a settings-changed signal, so the tunnel
+   picks the change up within about 2 s, with no restart. If the signal is
+   missed, the next 60 s maintenance pass applies it.
 2. Stream in Console.app with **Action ▸ Include Info Messages** on and filter
    on `subsystem:net.renalias.adblocker`.
 3. Look for lines prefixed `[verbose]`. These are the `debug` messages
