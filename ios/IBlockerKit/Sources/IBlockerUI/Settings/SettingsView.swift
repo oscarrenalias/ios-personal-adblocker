@@ -5,6 +5,7 @@ import IBlockerKit
 
 public struct SettingsView: View {
     @Environment(TunnelController.self) private var tunnel
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(FilterListsViewModel.self) private var lists
     @State private var resolver = AppEnvironment.settings.resolverSettings
     @State private var logEnabled = AppEnvironment.settings.queryLogEnabled
@@ -181,7 +182,11 @@ public struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .task {
+            .task(id: scenePhase) {
+                // Locking/backgrounding doesn't fire onDisappear; only poll
+                // while active. The id restarts the loop (immediate refresh)
+                // when the scene becomes active again.
+                guard scenePhase == .active else { return }
                 await refreshLoop()
             }
             .onAppear {
