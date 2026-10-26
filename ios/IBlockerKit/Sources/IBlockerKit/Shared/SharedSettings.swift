@@ -65,6 +65,7 @@ public struct SharedSettings: @unchecked Sendable {
         public static let pausedUntil = "pausedUntil"
         public static let protectionActive = "protectionActive"
         public static let verboseLoggingUntil = "verboseLoggingUntil"
+        public static let widgetResolverStatus = "widgetResolverStatus"
         public static let settingsAvailableSentinel = "settingsAvailableSentinel"
         public static let notificationsEnabled = "notificationsEnabled"
         /// Per-type toggles are stored under this prefix + `NotificationType.rawValue`.
@@ -250,6 +251,28 @@ public struct SharedSettings: @unchecked Sendable {
     public var protectionActive: Bool {
         get { defaults.bool(forKey: Keys.protectionActive) }
         nonmutating set { defaults.set(newValue, forKey: Keys.protectionActive) }
+    }
+
+    /// Mirror of the tunnel's resolver status for widgets, stored as JSON.
+    /// Reads as nil when missing or undecodable. Prefer
+    /// `writeWidgetResolverStatus(_:)` where an encode failure must be seen;
+    /// this setter drops it.
+    public var widgetResolverStatus: ResolverStatus? {
+        get {
+            guard let data = defaults.data(forKey: Keys.widgetResolverStatus) else { return nil }
+            return try? JSONDecoder().decode(ResolverStatus.self, from: data)
+        }
+        nonmutating set { try? writeWidgetResolverStatus(newValue) }
+    }
+
+    /// Stores `status` (nil removes the key). Throws the encoding error so the
+    /// caller, e.g. the tunnel, can log it; nothing is written on failure.
+    public func writeWidgetResolverStatus(_ status: ResolverStatus?) throws {
+        guard let status else {
+            defaults.removeObject(forKey: Keys.widgetResolverStatus)
+            return
+        }
+        defaults.set(try JSONEncoder().encode(status), forKey: Keys.widgetResolverStatus)
     }
 
     // MARK: - Status notifications

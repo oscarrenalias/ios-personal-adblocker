@@ -78,6 +78,7 @@ targets:
     dependencies:
       - package: IBlockerKit
         products: [IBlockerKit, IBlockerTunnelKit]
+      - sdk: WidgetKit.framework
 
   ContentBlocker:
     type: app-extension
