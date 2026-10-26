@@ -4,6 +4,7 @@ import IBlockerKit
 
 public struct DashboardView: View {
     @Environment(TunnelController.self) private var tunnel
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(QueryLogViewModel.self) private var log
     @Environment(\.switchToSettings) private var switchToSettings
     @State private var fileStats = BlockerStats()
@@ -41,7 +42,11 @@ public struct DashboardView: View {
             }
             .background(DashboardBackground())
             .toolbar(.hidden, for: .navigationBar)
-            .task {
+            .task(id: scenePhase) {
+                // Locking/backgrounding doesn't fire onDisappear; only poll
+                // while active. The id restarts the loop (immediate refresh)
+                // when the scene becomes active again.
+                guard scenePhase == .active else { return }
                 await refreshLoop()
             }
         }

@@ -119,7 +119,8 @@ public struct RootView: View {
                 selectedTab = tab
             }
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            log.setSceneActive(phase == .active, phase: String(describing: phase))
             if phase == .active {
                 Task {
                     await tunnel.refresh()
