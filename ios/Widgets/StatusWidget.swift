@@ -85,6 +85,7 @@ struct StatusWidgetView: View {
                     .font(.headline)
                 Text("\(entry.blockedToday.formatted()) blocked today")
                     .font(.caption)
+                encryptionLine(colored: false)
             }
         case .accessoryCircular:
             Gauge(value: 0) {
@@ -103,6 +104,7 @@ struct StatusWidgetView: View {
                         .foregroundStyle(statusColor)
                     Spacer()
                 }
+                encryptionLine(colored: true)
                 Spacer()
                 Text(entry.blockedToday.formatted(.number.notation(.compactName)))
                     .font(.system(.largeTitle, design: .rounded, weight: .bold))
@@ -114,6 +116,28 @@ struct StatusWidgetView: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    /// Encryption symbol and text on one tail-truncated line; empty when the
+    /// presentation has nothing to show (hidden or unknown).
+    @ViewBuilder
+    private func encryptionLine(colored: Bool) -> some View {
+        if let symbol = entry.encryption.symbol, let text = entry.encryption.text {
+            Label(text, systemImage: symbol)
+                .font(.caption2)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundStyle(colored ? AnyShapeStyle(encryptionColor) : AnyShapeStyle(.primary))
+        }
+    }
+
+    private var encryptionColor: Color {
+        switch entry.encryption.tone {
+        case .positive: return .green
+        case .warning: return .orange
+        case .critical: return .red
+        case nil: return .secondary
         }
     }
 
