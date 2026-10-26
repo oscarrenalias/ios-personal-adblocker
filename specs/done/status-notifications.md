@@ -5,7 +5,7 @@ description: "Local notifications for resolver fallback/failure, unexpected prot
 dependencies: null
 priority: medium
 complexity: null
-status: planned
+status: done
 tags:
 - notifications
 - tunnel

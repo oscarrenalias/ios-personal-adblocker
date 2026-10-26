@@ -16,9 +16,9 @@ Written 2026-10-25.
 | 2 | [Reliable blocklist updates](#reliable-blocklist-updates) (`spec-27c7b48b`) | — (can run alongside 1) | ✅ done |
 | 3 | [DNS caching](#dns-caching) (`spec-697234a9`) | 1 (sits in front of the router) | ✅ done, verified 2026-10-26 (low hit rate: iOS caches DNS itself) |
 | 4 | [Explain each decision](#explain-each-decision) + [Rule testing](#rule-testing) | 3 (to report "from cache") | L |
-| 5 | [Protection health indicator](#protection-health-indicator) | 0, 1 (status signals) | M |
+| 5 | [Protection health indicator](#protection-health-indicator) | 0, 1 (status signals) | M — on hold, needs more design |
 | 6 | [Quick controls](#quick-controls) (profiles dropped) | — | ✅ done, verified 2026-10-26 (pause buttons; 60-min button deferred) |
-| 7 | [Status notifications](#status-notifications) | resolver status (done); 5 for rules/health signals | ✅ built; on-device acceptance pending |
+| 7 | [Status notifications](#status-notifications) | resolver status (done); 5 for rules/health signals | ✅ done, verified 2026-10-26 |
 
 Why this order:
 - **1 first:** it decides how failures behave, and it's a small addition to a
