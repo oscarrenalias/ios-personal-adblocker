@@ -65,6 +65,7 @@ public final class TunnelController {
     public func enable() async {
         do {
             let manager = try await ensureManager()
+            AppEnvironment.settings.userTurnedOff = false
             manager.isEnabled = true
             manager.isOnDemandEnabled = true
             try await manager.saveToPreferences()
@@ -83,6 +84,8 @@ public final class TunnelController {
 
     public func disable() async {
         guard let manager else { return }
+        // Marker first, so the tunnel's stop is classified as user-initiated.
+        AppEnvironment.settings.userTurnedOff = true
         do {
             manager.isOnDemandEnabled = false
             try await manager.saveToPreferences()
