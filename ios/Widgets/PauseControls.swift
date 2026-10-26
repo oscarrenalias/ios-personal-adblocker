@@ -1,10 +1,9 @@
 import WidgetKit
 import AppIntents
 import SwiftUI
-import os
 import IBlockerKit
 
-private let controlsLog = Logger(subsystem: "net.renalias.adblocker", category: "controls")
+private let controlsLog = Log(category: "controls")
 
 /// Control Center button that pauses ad blocking for a fixed number of minutes.
 @available(iOS 18.0, *)
@@ -67,7 +66,7 @@ struct PauseIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         let label = "pause button \(minutes) min"
         guard let settings = WidgetEnvironment.settings else {
-            controlsLog.error("\(label, privacy: .public): shared settings unavailable")
+            controlsLog.error("\(label): shared settings unavailable")
             return .result()
         }
         let result = PauseDeadline.resolve(
@@ -77,16 +76,16 @@ struct PauseIntent: AppIntent {
             currentPausedUntil: settings.pausedUntil
         )
         guard case let .pause(deadline, replaced) = result else {
-            controlsLog.info("\(label, privacy: .public) ignored: protection off")
+            controlsLog.info("\(label) ignored: protection off")
             return .result()
         }
         if replaced, let old = settings.pausedUntil {
             let oldTime = old.formatted(date: .omitted, time: .shortened)
-            controlsLog.info("\(label, privacy: .public): replaced pause ending \(oldTime, privacy: .public)")
+            controlsLog.info("\(label): replaced pause ending \(oldTime)")
         }
         settings.pausedUntil = deadline
         let newTime = deadline.formatted(date: .omitted, time: .shortened)
-        controlsLog.notice("\(label, privacy: .public): paused until \(newTime, privacy: .public)")
+        controlsLog.notice("\(label): paused until \(newTime)")
 
         WidgetCenter.shared.reloadAllTimelines()
         ControlCenter.shared.reloadControls(ofKind: WidgetKinds.protectionControl)
