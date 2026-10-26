@@ -8,6 +8,14 @@
 // are written as one path with fill-rule nonzero: the ring's inner circle
 // winds opposite to its outer circle, and glyph outlines carry their own
 // winding, so only the ring interior and the natural counters ('0', '6') are open.
+//
+// Template requirements: the asset compiler reads the template version from the
+// <text id="template-version"> element (id required) holding
+// 'Template v.3.0' in the Notes group, and the Regular-M left/right margin
+// guides must exist. Without them actool emits 'Template Version 0' and Control
+// Center renders the symbol blank. Control Center may also resolve control
+// images through the containing app, so the same symbol sets are written to both
+// ios/Widgets/Assets.xcassets and ios/App/Assets.xcassets.
 import AppKit
 import CoreText
 import Foundation
@@ -98,6 +106,8 @@ func svg(minutes: Int, pathData: String) -> String {
       <rect id="artboard" width="3300" height="2200" fill="white" opacity="0"/>
       <text transform="matrix(1 0 0 1 263 322)" font-family="'SF Pro Text'" font-size="13" font-weight="bold">Notes</text>
       <text transform="matrix(1 0 0 1 263 342)" font-family="'SF Pro Text'" font-size="13">Custom symbol: pause for \(minutes) minutes (Regular-M only).</text>
+      <text id="template-version" transform="matrix(1 0 0 1 263 1919)" font-family="'SF Pro Text'" font-size="13">Template v.3.0</text>
+      <text transform="matrix(1 0 0 1 263 1939)" font-family="'SF Pro Text'" font-size="13">Requires Xcode 13 or greater</text>
      </g>
      <g id="Guides">
       <line id="Baseline-S" x1="263" x2="3036" y1="696" y2="696" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
@@ -106,6 +116,8 @@ func svg(minutes: Int, pathData: String) -> String {
       <line id="Capline-M" x1="263" x2="3036" y1="1056" y2="1056" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
       <line id="Baseline-L" x1="263" x2="3036" y1="1556" y2="1556" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
       <line id="Capline-L" x1="263" x2="3036" y1="1485.54" y2="1485.54" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
+      <line id="left-margin-Regular-M" x1="1504.6" x2="1504.6" y1="1056" y2="1126" style="fill:none;stroke:#00AEEF;stroke-miterlimit:10;stroke-width:0.5;"/>
+      <line id="right-margin-Regular-M" x1="1614.6" x2="1614.6" y1="1056" y2="1126" style="fill:none;stroke:#00AEEF;stroke-miterlimit:10;stroke-width:0.5;"/>
      </g>
      <g id="Symbols">
       <g id="Regular-M" transform="matrix(1 0 0 1 1559.6 1126)">
@@ -117,13 +129,37 @@ func svg(minutes: Int, pathData: String) -> String {
     """
 }
 
+func symbolContents(_ m: Int) -> String {
+    """
+    {
+      "info" : {
+        "author" : "xcode",
+        "version" : 1
+      },
+      "symbols" : [
+        {
+          "filename" : "pause.\(m).svg",
+          "idiom" : "universal"
+        }
+      ]
+    }
+
+    """
+}
+
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
 let font = makeFont()
 for m in minutesList {
     let ring = circle(outerRadius, cy: centreY, clockwise: true)
         + circle(outerRadius - ringWidth, cy: centreY, clockwise: false)
     let data = ring + digitsPath(String(m), font: font)
-    let url = root.appendingPathComponent("ios/Widgets/Assets.xcassets/pause.\(m).symbolset/pause.\(m).svg")
-    try svg(minutes: m, pathData: data).write(to: url, atomically: true, encoding: .utf8)
-    print("wrote \(url.path)")
+    for catalog in ["ios/Widgets/Assets.xcassets", "ios/App/Assets.xcassets"] {
+        let dir = root.appendingPathComponent("\(catalog)/pause.\(m).symbolset")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("pause.\(m).svg")
+        try svg(minutes: m, pathData: data).write(to: url, atomically: true, encoding: .utf8)
+        let contents = dir.appendingPathComponent("Contents.json")
+        try symbolContents(m).write(to: contents, atomically: true, encoding: .utf8)
+        print("wrote \(url.path)")
+    }
 }
