@@ -8,7 +8,10 @@ struct StatusEntry: TimelineEntry {
     let totalBlocked: UInt64
     let active: Bool
     let paused: Bool
+    let encryption: WidgetEncryptionPresentation
 }
+
+private let widgetsLog = Log(category: "widgets")
 
 /// App Group accessors resolved from the widget bundle's Info.plist.
 enum WidgetEnvironment {
@@ -26,7 +29,14 @@ enum WidgetEnvironment {
 
 struct StatusProvider: TimelineProvider {
     func placeholder(in context: Context) -> StatusEntry {
-        StatusEntry(date: Date(), blockedToday: 1234, totalBlocked: 98765, active: true, paused: false)
+        StatusEntry(
+            date: Date(), blockedToday: 1234, totalBlocked: 98765, active: true, paused: false,
+            encryption: WidgetEncryptionPresentation(
+                protectionActive: true,
+                paused: false,
+                resolverStatus: .alternative(name: "Cloudflare", encrypted: true)
+            )
+        )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (StatusEntry) -> Void) {
@@ -41,12 +51,22 @@ struct StatusProvider: TimelineProvider {
     private func makeEntry() -> StatusEntry {
         let stats = WidgetEnvironment.statsURL.map { StatsPersistence.load(from: $0) } ?? BlockerStats()
         let settings = WidgetEnvironment.settings
+        let now = Date()
+        let active = settings?.protectionActive ?? false
+        let paused = (settings?.pausedUntil ?? .distantPast) > now
+        let encryption = WidgetEncryptionPresentation(
+            protectionActive: active,
+            paused: paused,
+            resolverStatus: settings?.widgetResolverStatus
+        )
+        widgetsLog.debug("status entry: active=\(active) paused=\(paused) encryption=\(encryption.state.logName)")
         return StatusEntry(
-            date: Date(),
+            date: now,
             blockedToday: stats.counters(day: BlockerStats.dayKey()).blocked,
             totalBlocked: stats.totalBlocked,
-            active: settings?.protectionActive ?? false,
-            paused: settings?.pausedUntil != nil
+            active: active,
+            paused: paused,
+            encryption: encryption
         )
     }
 }
