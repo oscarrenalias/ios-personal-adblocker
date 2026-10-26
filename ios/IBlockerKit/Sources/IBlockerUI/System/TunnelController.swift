@@ -31,6 +31,7 @@ public final class TunnelController {
     private var statusObserver: NSObjectProtocol?
     private var statsAvailable: Bool?
     private static let log = Log(category: "ipc")
+    private static let uiLog = Log(category: "ui")
 
     public init() {
         statusObserver = NotificationCenter.default.addObserver(
@@ -130,10 +131,23 @@ public final class TunnelController {
         case .connected: state = .connected
         case .connecting, .reasserting: state = .connecting
         case .disconnecting: state = .disconnecting
-        case .disconnected: state = .disconnected
-        case .invalid: state = .notInstalled
+        case .disconnected:
+            state = .disconnected
+            clearStaleWidgetResolverStatus(vpnStatus: "disconnected")
+        case .invalid:
+            state = .notInstalled
+            clearStaleWidgetResolverStatus(vpnStatus: "invalid")
         @unknown default: state = .unknown
         }
+    }
+
+    /// The widgets' resolver mirror describes a running tunnel; once the VPN is
+    /// down it would show a stale answer, so drop it and refresh the widgets.
+    private func clearStaleWidgetResolverStatus(vpnStatus: String) {
+        guard AppEnvironment.settings.widgetResolverStatus != nil else { return }
+        AppEnvironment.settings.widgetResolverStatus = nil
+        VPNControl.reloadWidgets()
+        Self.uiLog.info("cleared stale widget resolver status (vpn \(vpnStatus))")
     }
 
     // MARK: - IPC

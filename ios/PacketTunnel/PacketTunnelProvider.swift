@@ -2,6 +2,7 @@ import Network
 import NetworkExtension
 import os
 import UserNotifications
+import WidgetKit
 import IBlockerKit
 import IBlockerTunnelKit
 
@@ -40,6 +41,75 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private let notifier = StatusNotifier()
     /// Bumped by every `makeRouter`; callbacks from older routers are dropped.
     private let routerGeneration = LockedBox(0)
+    /// Last (state, name) the widget was told about. Guards the write, the
+    /// gate decision and the reload so concurrent publishes can't interleave.
+    private let widgetPublished = LockedBox<WidgetReloadGate.Published?>(nil)
+
+    /// Mirrors `status` into the shared settings and reloads the widget
+    /// timeline only when the gate says the visible line changed.
+    /// `status` is read inside the critical section, and a non-nil `generation`
+    /// is re-checked there, so a late callback from a replaced router can't
+    /// publish after (or over) a newer router's value.
+    private func publishWidgetStatus(generation: Int? = nil, _ status: () -> ResolverStatus?) {
+        guard let settings = AppGroupPaths.groupID(from: Bundle.main).flatMap({ SharedSettings(groupID: $0) }) else {
+            Self.log.error("widget resolver status not published: app group unavailable")
+            return
+        }
+        widgetPublished.withValue { last in
+            if let generation, routerGeneration.withValue({ $0 }) != generation {
+                Self.log.info("widget resolver status ignored: replaced router")
+                return
+            }
+            let status = status()
+            do {
+                try settings.writeWidgetResolverStatus(status)
+            } catch {
+                Self.log.error("widget resolver status write failed: \(error)")
+                return
+            }
+            let decision = WidgetReloadGate.evaluate(last: last, status: status)
+            last = decision.published
+            let state = decision.published.state
+            guard decision.shouldReload else {
+                Self.log.debug("widget resolver status unchanged (\(state)), no reload")
+                return
+            }
+            Self.log.info("widget resolver status: \(state) (\(decision.published.name ?? "none"))")
+            Self.reloadWidget(reason: "change")
+        }
+    }
+
+    /// Unconditional reload for tunnel start and stop.
+    private func reloadWidget(reason: String) {
+        widgetPublished.withValue { _ in Self.reloadWidget(reason: reason) }
+    }
+
+    /// Stop: clears the value, resets the gate and reloads unconditionally.
+    private func clearWidgetStatus() {
+        if let groupID = AppGroupPaths.groupID(from: Bundle.main),
+           let settings = SharedSettings(groupID: groupID) {
+            widgetPublished.withValue { last in
+                do {
+                    try settings.writeWidgetResolverStatus(nil)
+                } catch {
+                    Self.log.error("widget resolver status clear failed: \(error)")
+                }
+                last = nil
+                Self.reloadWidget(reason: "stop")
+            }
+        } else {
+            Self.log.error("widget resolver status not cleared: app group unavailable")
+            widgetPublished.withValue { last in
+                last = nil
+                Self.reloadWidget(reason: "stop")
+            }
+        }
+    }
+
+    private static func reloadWidget(reason: String) {
+        log.debug("widget reload requested (\(reason))")
+        WidgetCenter.shared.reloadTimelines(ofKind: WidgetKinds.statusWidget)
+    }
 
     /// Drives status notification events 1-4, 6 and 7 through the policy and poster.
     /// An actor so router callbacks, IPC and start/stop don't interleave
@@ -264,12 +334,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             network: network,
             alternative: alternative,
             policy: settings.fallbackPolicy,
-            onStatusChange: { status in
+            onStatusChange: { [weak self] status in
                 // In-flight probes/queries of a replaced router can still report.
                 guard generationBox.withValue({ $0 }) == generation else {
                     notifyLog.info("ignored status change from replaced router")
                     return
                 }
+                self?.publishWidgetStatus(generation: generation) { status }
                 if let engine = engineBox.withValue({ $0 }) {
                     Task { await engine.clearCache(reason: .resolverStatusChange) }
                 }
@@ -412,6 +483,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         try await setTunnelNetworkSettings(networkSettings)
         settings?.protectionActive = true
+        publishWidgetStatus { settingsReadable ? router.status : nil }
+        reloadWidget(reason: "start")
         await notifier.tunnelStarted()
         if recovery.isDegraded { await notifier.degradedStarted() }
 
@@ -433,6 +506,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
            let settings = SharedSettings(groupID: groupID) {
             settings.protectionActive = false
         }
+        clearWidgetStatus()
         await notifier.tunnelStopped(reason: reason)
         if let engine {
             await engine.flush()
@@ -474,6 +548,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if let newRouter = makeRouter(resolverSettings, source: "ipc") {
                 await engine.setUpstream(newRouter)
                 router = newRouter
+                publishWidgetStatus { newRouter.status }
                 await notifier.resolverStatusChanged(newRouter.status)
                 response = .ok
             } else {
@@ -682,6 +757,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         if let newRouter = self.makeRouter(resolverSettings, source: "recovery") {
                             await engine.setUpstream(newRouter)
                             self.router = newRouter
+                            self.publishWidgetStatus { newRouter.status }
                             await self.notifier.resolverStatusChanged(newRouter.status)
                             upstreamName = resolverSettings.useAlternative ? resolverSettings.alternativeName : "Network DNS"
                         }

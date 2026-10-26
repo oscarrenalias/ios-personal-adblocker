@@ -88,6 +88,25 @@ wall-clock only; no domain names.
 | `info` | `<label> ignored: protection off`; `<label>: replaced pause ending <time>` |
 | `error` | `<label>: shared settings unavailable` |
 
+### The `widgets` category
+
+The status widget (`StatusWidget`, in the Widgets extension) logs under
+`widgets` through the `Log` wrapper. No domain names.
+
+| Level | Events |
+|---|---|
+| `debug` | `status entry: active=<bool> paused=<bool> encryption=<state>`, once per `makeEntry` (each timeline or snapshot build) |
+
+The tunnel and the app log the widget's resolver mirror under their own
+categories:
+
+| Category | Level | Events |
+|---|---|---|
+| `tunnel` | `info` | `widget resolver status: <state> (<resolver name or none>)`, when the gate decides the visible line changed and the widget is reloaded |
+| `tunnel` | `debug` | `widget resolver status unchanged (<state>), no reload`; `widget reload requested (<reason>)`, where reason is `change`, `start` or `stop` |
+| `tunnel` | `error` | `widget resolver status not published: app group unavailable`; `widget resolver status write failed: <error>`; `widget resolver status clear failed: <error>`; `widget resolver status not cleared: app group unavailable` |
+| `ui` | `info` | `cleared stale widget resolver status (vpn disconnected)` / `(vpn invalid)`, from `TunnelController` |
+
 ### The `cache` category
 
 The tunnel's DNS cache (`DNSCache`) logs under `cache`. Domain names appear
