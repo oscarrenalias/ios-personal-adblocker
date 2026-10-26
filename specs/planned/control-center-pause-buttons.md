@@ -12,7 +12,7 @@ tags:
 scope:
   in: null
   out: null
-feature_root_id: "B-3d1008ff\nB-3a52edcd"
+feature_root_id: B-3a52edcd
 ---
 # Control Center pause buttons
 
