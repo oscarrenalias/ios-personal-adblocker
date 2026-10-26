@@ -5,7 +5,7 @@ description: "Attribute each DNS decision to its rule and source, fix list excep
 dependencies: null
 priority: high
 complexity: null
-status: planned
+status: done
 tags:
 - rules
 - query-log
