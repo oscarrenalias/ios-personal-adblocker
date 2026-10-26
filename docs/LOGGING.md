@@ -88,6 +88,20 @@ wall-clock only; no domain names.
 | `info` | `<label> ignored: protection off`; `<label>: replaced pause ending <time>` |
 | `error` | `<label>: shared settings unavailable` |
 
+### The `cache` category
+
+The tunnel's DNS cache (`DNSCache`) logs under `cache`. Domain names appear
+only at `debug`; `info` and above log counts, sizes and reasons.
+
+| Level | Events |
+|---|---|
+| `notice` | `cache cleared (<reason>): N entries`; reasons are `resolver change`, `resolver status change`, `network change`, `user` |
+| `info` | `cache evicted N entries (entry limit)` / `(byte limit)`, throttled to once a minute; `cache: N entries, N KB, hit rate N% (hits, misses), evicted N`, every 10 minutes when there was traffic |
+| `debug` | `hit <name> <type>, ttl left N s`; `miss <name>` and `miss <name>: expired` / `stored response unusable`; `stored <name> <type>, ttl N s`; `not cached <name>: <reason>`; `cache purged N expired entries`; `not cached ...: cache cleared while in flight` |
+
+The tunnel also logs `IPC clearDNSCache` (`tunnel`, `info`) and the app logs
+`clearDNSCache requested` (`notice`) or `clearDNSCache failed: ...` (`error`).
+
 ## Reading the logs
 
 - **Console.app on the Mac:** connect the iPhone, select it in the sidebar,

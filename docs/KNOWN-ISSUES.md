@@ -19,7 +19,7 @@ worth knowing.
 4. [ ] [KI-4](#ki-4-tunnel-wakes-up-every-2-seconds) Battery: 2-second wake-ups
 5. [x] [KI-5](#ki-5-background-list-refresh-probably-never-runs) Background refresh
 6. [ ] [KI-6](#ki-6-list-exceptions-cant-unblock-subdomains) List exceptions
-7. [ ] [KI-7](#ki-7-pause-and-unblock-take-up-to-5-minutes) Pause/unblock delay (small, fix alongside others)
+7. [x] [KI-7](#ki-7-pause-and-unblock-take-up-to-5-minutes) Pause/unblock delay (fixed with the DNS cache work)
 
 ---
 
@@ -116,7 +116,9 @@ either turn the relay handling back on or correct `BLOCKING-MODES.md`.
 
 ### KI-4: Tunnel wakes up every 2 seconds
 
-- **Status:** open
+- **Status:** open, partly addressed: the DNS cache (KI-9) answers repeat
+  lookups inside the tunnel, so fewer queries reach the resolver. The
+  2-second maintenance loop is unchanged.
 - **Where:** `ios/PacketTunnel/PacketTunnelProvider.swift` (`startMaintenance`),
   `DNSProxyEngine.flush`
 
@@ -162,8 +164,10 @@ the matcher at lookup time, the same way the user allowlist is checked.
 
 ### KI-7: Pause and unblock take up to 5 minutes
 
-- **Status:** open
-- **Where:** `DNSProxyEngine.Configuration.blockTTL` (300)
+- **Status:** fixed. `DNSProxyEngine.Configuration.blockTTL` now defaults to
+  10 s (was 300), so iOS forgets a blocked answer within seconds of a pause or
+  allowlist change. Part of the DNS caching work (`spec-697234a9`).
+- **Where:** `DNSProxyEngine.Configuration.blockTTL`
 
 Blocked answers tell iOS to cache them for 300 seconds. After a pause, or
 after adding a site to the allowlist, iOS keeps using the cached "blocked"
@@ -188,8 +192,13 @@ That's fine for personal use, but it should be a conscious choice.
 
 ### KI-9: No DNS cache in the tunnel
 
-Every non-blocked lookup goes to the resolver. iOS caches too, so the effect
-is moderate. Adding a small cache would make lookups faster and save battery.
+- **Status:** fixed (`spec-697234a9`), pending a device check.
+- **Where:** `DNSCache`, `DNSProxyEngine`
+
+Every non-blocked lookup used to go to the resolver. The tunnel now keeps a
+bounded in-memory cache (see [ARCHITECTURE.md](ARCHITECTURE.md#dns-cache)).
+Settings has a "Clear DNS cache" button and a cache row with entry count and
+hit rate.
 
 ### KI-10: CNAME cloaking isn't caught
 

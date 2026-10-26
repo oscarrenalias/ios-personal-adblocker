@@ -14,7 +14,7 @@ Written 2026-10-25.
 | 0 | ~~Finish reboot robustness~~ (defects `B-0d1e113d`, `B-28826355`) | — | ✅ done, verified 2026-10-25 |
 | 1 | [Configurable failure policy](#configurable-failure-policy): encryption part ✅ done (`spec-c7e3c45d`, `spec-d10b070a`); filtering part moves to 5 | KI-1 part 1 (done) | — |
 | 2 | [Reliable blocklist updates](#reliable-blocklist-updates) (`spec-27c7b48b`) | — (can run alongside 1) | ✅ done |
-| 3 | [DNS caching](#dns-caching) | 1 (sits in front of the router) | M |
+| 3 | [DNS caching](#dns-caching) (`spec-697234a9`) | 1 (sits in front of the router) | ✅ built; on-device check pending |
 | 4 | [Explain each decision](#explain-each-decision) + [Rule testing](#rule-testing) | 3 (to report "from cache") | L |
 | 5 | [Protection health indicator](#protection-health-indicator) | 0, 1 (status signals) | M |
 | 6 | [Quick controls](#quick-controls) (profiles dropped) | — | ✅ built; on-device acceptance pending |
@@ -90,9 +90,10 @@ fetched time and last error shown in Lists.
 **Want:** respect TTLs, cache negative answers appropriately, invalidate
 entries when rules change, and offer a "clear cache" action.
 
-**Exists:** nothing (KI-9). iOS caches on its own side too.
+**Status:** built (`spec-697234a9`); fixes KI-9 and KI-7. On-device check
+pending. iOS caches on its own side too. The list below is what was built.
 
-**Missing:**
+**Built:**
 - A bounded in-memory cache in the tunnel, keyed by name, type and class,
   sitting in front of the router.
 - TTLs taken from the answer (lowest TTL in the answer section; SOA minimum
