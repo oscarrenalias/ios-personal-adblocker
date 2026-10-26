@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--Generator: custom pause.30 symbol-->
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="3300" height="2200">
+ <g id="Notes">
+  <rect id="artboard" width="3300" height="2200" fill="white" opacity="0"/>
+  <text transform="matrix(1 0 0 1 263 322)" font-family="'SF Pro Text'" font-size="13" font-weight="bold">Notes</text>
+  <text transform="matrix(1 0 0 1 263 342)" font-family="'SF Pro Text'" font-size="13">Custom symbol: pause for 30 minutes (Regular-M only).</text>
+ </g>
+ <g id="Guides">
+  <line id="Baseline-S" x1="263" x2="3036" y1="696" y2="696" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
+  <line id="Capline-S" x1="263" x2="3036" y1="625.541" y2="625.541" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
+  <line id="Baseline-M" x1="263" x2="3036" y1="1126" y2="1126" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
+  <line id="Capline-M" x1="263" x2="3036" y1="1056" y2="1056" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
+  <line id="Baseline-L" x1="263" x2="3036" y1="1556" y2="1556" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
+  <line id="Capline-L" x1="263" x2="3036" y1="1485.54" y2="1485.54" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
+ </g>
+ <g id="Symbols">
+  <g id="Regular-M" transform="matrix(1 0 0 1 1559.6 1126)">
+   <path d="M-49 -35a49 49 0 1 0 98 0a49 49 0 1 0 -98 0ZM-43 -35a43 43 0 1 0 86 0a43 43 0 1 0 -86 0ZM-29.50 -59.00h27.00v9.00h-27.00ZM-11.50 -59.00h9.00v28.50h-9.00ZM-29.50 -39.50h27.00v9.00h-27.00ZM-11.50 -39.50h9.00v28.50h-9.00ZM-29.50 -20.00h27.00v9.00h-27.00ZM2.50 -59.00h27.00v9.00h-27.00ZM20.50 -59.00h9.00v28.50h-9.00ZM20.50 -39.50h9.00v28.50h-9.00ZM2.50 -20.00h27.00v9.00h-27.00ZM2.50 -39.50h9.00v28.50h-9.00ZM2.50 -59.00h9.00v28.50h-9.00Z" fill-rule="evenodd"/>
+  </g>
+ </g>
+</svg>

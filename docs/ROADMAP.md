@@ -17,7 +17,7 @@ Written 2026-10-25.
 | 3 | [DNS caching](#dns-caching) | 1 (sits in front of the router) | M |
 | 4 | [Explain each decision](#explain-each-decision) + [Rule testing](#rule-testing) | 3 (to report "from cache") | L |
 | 5 | [Protection health indicator](#protection-health-indicator) | 0, 1 (status signals) | M |
-| 6 | [Quick controls](#quick-controls) (profiles dropped) | — | S |
+| 6 | [Quick controls](#quick-controls) (profiles dropped) | — | ✅ built; on-device acceptance pending |
 | 7 | [Status notifications](#status-notifications) | resolver status (done); 5 for rules/health signals | ✅ built; on-device acceptance pending |
 
 Why this order:
@@ -177,8 +177,12 @@ Profiles were **dropped** on 2026-10-25 to keep things simple.
 - A Control Center toggle (`ProtectionControl`).
 - Shortcuts: enable, disable, pause (5, 15 or 60 min), resume, update lists.
 
+- Control Center pause buttons for 5, 10, 30 and 60 min (`PauseControl`,
+  `PauseIntent` in `ios/Widgets/PauseControls.swift`), registered in the widget
+  bundle. They set `SharedSettings.pausedUntil` through `PauseDeadline`.
+  Still to confirm by hand on an iOS 18 device.
+
 **Missing:**
-- Pause lengths in Control Center. Today the toggle is only on/off.
 - Possibly: show encryption state in widgets and Control Center (follow-up
   from `spec-c7e3c45d`).
 

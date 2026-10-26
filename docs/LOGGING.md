@@ -17,7 +17,7 @@ from the logs alone.
 - **Subsystem:** `net.renalias.adblocker`, the same for every target, so one filter
   shows everything.
 - **Category:** the component, for example `tunnel`, `engine`, `upstream`,
-  `network-dns`, `path`, `lists`, `settings`, `ui`, `notify`.
+  `network-dns`, `path`, `lists`, `settings`, `ui`, `notify`, `controls`.
 - Log through the small `os.Logger` wrapper `Log`
   (`IBlockerKit/Shared/Log.swift`). Create one per component with
   `Log(category: "engine")` and call `error`, `notice`, `info` or `debug`.
@@ -74,6 +74,19 @@ Status notifications (policy, poster, tunnel and app triggers) log under
 | `info` | `suppressed <kind>: <reason>` (master off, type disabled, rate-limited, already notified this episode, not authorized); `cancelled pending <kind> (cleared after N s)`; `opened from notification kind <kind> -> <tab>`; `resolver episodes dismissed: alternative turned off`; `ignored status change from replaced router`; `tunnel-gone check: <result>`; `<kind> episode ended (list <id>)` |
 | `error` | `authorization request failed`; `add failed for <kind>` |
 | `debug` | policy trace (inputs and outcome of each decision), `no problem/restore content for <kind>`, deferred degraded notification, deferred or retried tunnel start notification, `list-rejected not notified: user-triggered run` |
+
+### The `controls` category
+
+The Control Center pause buttons (`PauseIntent`, in the Widgets extension) log
+under `controls`, using `os.Logger` directly because the extension doesn't use
+the `Log` wrapper. `<label>` is `pause button N min`. Times are local
+wall-clock only; no domain names.
+
+| Level | Events |
+|---|---|
+| `notice` | `<label>: paused until <time>` |
+| `info` | `<label> ignored: protection off`; `<label>: replaced pause ending <time>` |
+| `error` | `<label>: shared settings unavailable` |
 
 ## Reading the logs
 
