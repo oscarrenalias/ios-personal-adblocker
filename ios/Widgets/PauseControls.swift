@@ -15,7 +15,7 @@ struct PauseControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: kind) {
             ControlWidgetButton(action: PauseIntent(minutes: minutes)) {
-                Label("Pause \(minutes) min", systemImage: "pause.circle.fill")
+                Label("Pause \(minutes) min", image: "pause.\(minutes)")
             }
             .tint(.orange)
         }
