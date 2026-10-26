@@ -44,9 +44,7 @@ final class FilterListUpdaterTests: XCTestCase {
     func testHiddenSourceIsNotFetched() async throws {
         try XCTSkipIf(FeatureFlags.hiddenSourceIDs.isEmpty, "Nothing is hidden")
         let paths = AppGroupPaths(containerURL: try makeTempDirectory())
-        let hiddenID = try XCTUnwrap(FeatureFlags.hiddenSourceIDs.first { id in
-            SeedRules.bundledText(for: id) == nil
-        })
+        let hiddenID = try XCTUnwrap(FeatureFlags.hiddenSourceIDs.first)
 
         var state = FilterListState()
         let index = try XCTUnwrap(state.sources.firstIndex { $0.id == hiddenID })
