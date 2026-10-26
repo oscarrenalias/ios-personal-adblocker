@@ -22,9 +22,11 @@ public enum FeatureFlags {
     /// the tunnel in a mode with no way back.
     public static let showAppleRelayControls = false
 
-    /// HaGeZi Multi Pro. Held back while its feed is being verified; the
-    /// source definition, its rules, and its parsing stay in place.
-    public static let showHaGeZiList = false
+    /// HaGeZi Multi Pro. Offered in Filter Lists as an opt-in built-in
+    /// (disabled until the user turns it on). The feed was verified on
+    /// 2026-10-26. Setting this to `false` hides the source and stops it
+    /// downloading, compiling, or matching.
+    public static let showHaGeZiList = true
 
     /// Sources that must not appear, fetch, compile, or match while hidden.
     /// A hidden source that still downloads would keep recording errors no

@@ -85,4 +85,28 @@ final class FilterListParserTests: XCTestCase {
             (0..<40).map { _ in String(repeating: "x", count: 10) }.joined(separator: ".")
         ))
     }
+
+    /// HaGeZi Multi Pro is offered as an opt-in built-in, and its feed format
+    /// (ABP header, `!` comments, `||domain^` rules) parses cleanly.
+    func testHaGeZiIsOfferedOptInAndFeedFormatParses() throws {
+        XCTAssertTrue(FeatureFlags.showHaGeZiList)
+        XCTAssertFalse(FeatureFlags.hiddenSourceIDs.contains(FilterListSource.hageziID))
+        let source = try XCTUnwrap(FilterListSource.builtIn.first { $0.id == FilterListSource.hageziID })
+        XCTAssertTrue(source.isBuiltIn)
+        XCTAssertFalse(source.enabled)
+
+        let parsed = FilterListParser.parse("""
+        [Adblock Plus]
+        ! Title: HaGeZi's Pro DNS Blocklist
+        ! Version: 2026.1026.1200.00
+        ||a.example.com^
+        ||b.example.net^
+        ||c.example.org^
+        """)
+        XCTAssertEqual(parsed.blockDomains, ["a.example.com", "b.example.net", "c.example.org"])
+        XCTAssertTrue(parsed.allowDomains.isEmpty)
+        XCTAssertEqual(parsed.commentLines, 3)
+        XCTAssertEqual(parsed.skippedLines, 0)
+        XCTAssertEqual(parsed.totalLines, 6)
+    }
 }
