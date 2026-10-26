@@ -504,3 +504,113 @@ extension StatusNotificationPolicy {
         state.fireTimes[kind] = times
     }
 }
+
+// MARK: - Content builders
+
+/// What a notification says and where a tap goes. Pure data; the poster maps
+/// it onto `UNMutableNotificationContent`. Never holds a domain, IP or URL.
+public struct StatusNotificationContent: Sendable, Equatable {
+    public static let kindKey = "kind"
+    public static let tabKey = "tab"
+
+    public let identifier: String
+    public let title: String
+    public let body: String
+    public let userInfo: [String: String]
+    public let tab: StatusNotificationKind.Tab
+
+    fileprivate init(kind: StatusNotificationKind, identifier: String, title: String, body: String) {
+        self.identifier = identifier
+        self.title = title
+        self.body = body
+        self.tab = kind.targetTab
+        self.userInfo = [Self.kindKey: kind.rawValue, Self.tabKey: kind.targetTab.rawValue]
+    }
+}
+
+extension StatusNotificationKind {
+    /// Request identifier for this kind's notification. A restore reuses the
+    /// identifier of the problem it follows, so it replaces that notification.
+    public var notificationIdentifier: String { "status.\(rawValue)" }
+}
+
+public enum StatusNotificationContentBuilder {
+    public static let customResolverName = "your custom resolver"
+    public static let customListName = "a custom blocklist"
+
+    /// Preset names are the only resolver text that may appear. Anything else
+    /// (custom DoH, a typed name, a URL) collapses to a generic phrase.
+    public static func resolverDisplayName(_ name: String) -> String {
+        UpstreamPreset.all.contains { $0.name == name } ? name : customResolverName
+    }
+
+    /// Built-in lists show their name, custom lists the name the user typed;
+    /// an empty name never falls back to the URL host.
+    public static func listDisplayName(_ source: FilterListSource) -> String {
+        if source.isBuiltIn { return source.name }
+        let trimmed = source.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? customListName : trimmed
+    }
+
+    /// Problem notification for `kind`. `resolverName` is the status name
+    /// (events 1, 2); `listName` the display name from `listDisplayName` (event 5).
+    /// `.restored` isn't a problem: use `restore(forKind:resolverName:)`.
+    public static func problem(
+        _ kind: StatusNotificationKind,
+        resolverName: String? = nil,
+        listName: String? = nil
+    ) -> StatusNotificationContent? {
+        let title: String
+        let body: String
+        switch kind {
+        case .resolverFallback:
+            title = "Encrypted DNS unavailable"
+            body = "Lookups are going unencrypted to your network's DNS."
+        case .resolverFailing:
+            title = "DNS lookups are failing"
+            body = "\(resolverDisplayName(resolverName ?? "")) can't be reached and fallback is off."
+        case .protectionStopped:
+            title = "Ad blocking is off"
+            body = "Another VPN may have taken over, or protection stopped. Open the app to turn it back on."
+        case .listRejected:
+            title = "Blocklist update rejected"
+            body = "\(listName ?? customListName): using the previous version."
+        case .listStale:
+            title = "Blocklist out of date"
+            body = "\(listName ?? customListName) hasn't updated in over 7 days."
+        case .pauseEnded:
+            title = "Pause ended"
+            body = "Ad blocking is back on."
+        case .degraded:
+            title = "Only built-in rules are active"
+            body = "Your blocklists couldn't be loaded yet."
+        case .restored:
+            return nil
+        }
+        return StatusNotificationContent(kind: kind, identifier: kind.notificationIdentifier, title: title, body: body)
+    }
+
+    /// Restore for the problem `kind`; carries that problem's identifier and
+    /// tab. Nil for kinds that have no restore (5, 6, `.restored`).
+    public static func restore(
+        forKind kind: StatusNotificationKind,
+        resolverName: String? = nil
+    ) -> StatusNotificationContent? {
+        let title: String
+        let body: String
+        switch kind {
+        case .resolverFallback, .resolverFailing:
+            title = "Encrypted DNS restored"
+            body = "\(resolverDisplayName(resolverName ?? "")) is reachable again."
+        case .protectionStopped:
+            title = "Ad blocking is back on"
+            body = "Protection is running again."
+        case .degraded:
+            title = "Blocklists active"
+            body = "All blocklists are active again."
+        case .restored, .listRejected, .listStale, .pauseEnded:
+            return nil
+        }
+        return StatusNotificationContent(kind: kind, identifier: kind.notificationIdentifier, title: title, body: body)
+    }
+}
