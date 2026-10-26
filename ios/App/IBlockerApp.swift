@@ -5,6 +5,9 @@ import UserNotifications
 
 /// Shows status notifications while the app is in the foreground and routes
 /// a tap to the tab named in the notification's userInfo.
+/// Main-actor isolated so the async delegate methods, and the completion
+/// handler UserNotifications bridges to them, run on the main thread.
+@MainActor
 final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     private let log = Log(category: "notify")
 
@@ -24,7 +27,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         let tab = tabName.flatMap(StatusNotificationKind.Tab.init(rawValue:)) ?? .dashboard
         let kind = info[StatusNotificationContent.kindKey] as? String ?? "unknown"
         log.info("opened from notification kind \(kind) -> \(tab.rawValue)")
-        await MainActor.run { NotificationTabRouter.shared.route(to: tab) }
+        NotificationTabRouter.shared.route(to: tab)
     }
 }
 
