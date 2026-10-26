@@ -5,7 +5,7 @@ description: Show DNS encryption state (encrypted / unencrypted / fallback / fai
 dependencies: null
 priority: medium
 complexity: null
-status: planned
+status: done
 tags:
 - widgets
 - resolver
