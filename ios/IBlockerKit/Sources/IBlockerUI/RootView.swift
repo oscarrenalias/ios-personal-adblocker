@@ -43,6 +43,21 @@ extension EnvironmentValues {
     }
 }
 
+/// Rate limiter for the query-log flush hook.
+@MainActor
+private final class FlushThrottle {
+    private let interval: TimeInterval
+    private var last: Date = .distantPast
+
+    init(interval: TimeInterval) { self.interval = interval }
+
+    func shouldFire(now: Date = Date()) -> Bool {
+        guard now.timeIntervalSince(last) >= interval else { return false }
+        last = now
+        return true
+    }
+}
+
 public struct RootView: View {
     @State private var selectedTab: RootTab = .dashboard
     @State private var tunnel = TunnelController()
