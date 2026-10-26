@@ -5,42 +5,42 @@ import IBlockerKit
 
 private let controlsLog = Log(category: "controls")
 
-/// Control Center button that pauses ad blocking for a fixed number of minutes.
-@available(iOS 18.0, *)
-struct PauseControl {
-    let kind: String
-    let minutes: Int
-
-    var body: some ControlWidgetConfiguration {
-        StaticControlConfiguration(kind: kind) {
-            ControlWidgetButton(action: PauseIntent(minutes: minutes)) {
-                Label("Pause \(minutes) min", systemImage: "\(minutes).circle")
-            }
-            .tint(.orange)
-        }
-        .displayName("Pause \(minutes) min")
-        .description("Pause ad blocking for \(minutes) minutes.")
-    }
-}
-
 @available(iOS 18.0, *)
 struct Pause5Control: ControlWidget {
     var body: some ControlWidgetConfiguration {
-        PauseControl(kind: WidgetKinds.pause5Control, minutes: 5).body
+        StaticControlConfiguration(kind: WidgetKinds.pause5Control) {
+            ControlWidgetButton(action: PauseIntent(minutes: 5)) {
+                Label("Pause 5 min", systemImage: "5.circle")
+            }
+        }
+        .displayName("Pause 5 min")
+        .description("Pause ad blocking for 5 minutes.")
     }
 }
 
 @available(iOS 18.0, *)
 struct Pause10Control: ControlWidget {
     var body: some ControlWidgetConfiguration {
-        PauseControl(kind: WidgetKinds.pause10Control, minutes: 10).body
+        StaticControlConfiguration(kind: WidgetKinds.pause10Control) {
+            ControlWidgetButton(action: PauseIntent(minutes: 10)) {
+                Label("Pause 10 min", systemImage: "10.circle")
+            }
+        }
+        .displayName("Pause 10 min")
+        .description("Pause ad blocking for 10 minutes.")
     }
 }
 
 @available(iOS 18.0, *)
 struct Pause30Control: ControlWidget {
     var body: some ControlWidgetConfiguration {
-        PauseControl(kind: WidgetKinds.pause30Control, minutes: 30).body
+        StaticControlConfiguration(kind: WidgetKinds.pause30Control) {
+            ControlWidgetButton(action: PauseIntent(minutes: 30)) {
+                Label("Pause 30 min", systemImage: "30.circle")
+            }
+        }
+        .displayName("Pause 30 min")
+        .description("Pause ad blocking for 30 minutes.")
     }
 }
 
