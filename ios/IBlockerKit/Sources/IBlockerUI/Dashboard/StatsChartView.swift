@@ -67,6 +67,7 @@ public struct StatsChartView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal)
         .onAppear { log.startPolling() }
+        .onDisappear { log.stopPolling() }
     }
 }
 #endif

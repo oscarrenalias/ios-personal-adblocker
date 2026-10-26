@@ -221,6 +221,23 @@ public final class TunnelController {
         await refreshStats()
     }
 
+    /// Asks the tunnel to flush its buffered query log to shared storage so
+    /// the app reads current entries. No-op unless the tunnel is connected.
+    public func flushQueryLog() async {
+        guard state == .connected else {
+            Self.log.debug("flushQueryLog skipped: tunnel not connected (state \(String(describing: state)))")
+            return
+        }
+        switch await send(.flushLog) {
+        case .ok?:
+            Self.log.debug("flushQueryLog requested")
+        case .failure(let message)?:
+            Self.log.error("flushQueryLog failed: \(message)")
+        case .stats?, nil:
+            Self.log.error("flushQueryLog failed: no reply")
+        }
+    }
+
     // MARK: - Pause
 
     public var pausedUntil: Date? { runtimeStats?.pausedUntil }
