@@ -47,6 +47,8 @@ public enum TunnelRequest: Codable, Sendable {
     case setResolverSettings(ResolverSettings)
     /// Suspend blocking until the given instant; nil resumes.
     case setPause(until: Date?)
+    /// Drop every cached DNS answer; answered with .ok.
+    case clearDNSCache
 }
 
 public struct TunnelRuntimeStats: Codable, Sendable, Equatable {
@@ -59,10 +61,15 @@ public struct TunnelRuntimeStats: Codable, Sendable, Equatable {
     public var pausedUntil: Date?
     /// Resolver health as seen by the router; nil when reported by an older tunnel.
     public var resolverStatus: ResolverStatus?
+    /// DNS cache counters; nil when reported by an older tunnel.
+    public var cacheEntries: UInt64?
+    public var cacheHits: UInt64?
+    public var cacheMisses: UInt64?
 
     public init(startedAt: Date? = nil, totalQueries: UInt64 = 0, blockedQueries: UInt64 = 0,
                 blocklistEntryCount: UInt64 = 0, memoryBytes: UInt64? = nil, pausedUntil: Date? = nil,
-                resolverStatus: ResolverStatus? = nil) {
+                resolverStatus: ResolverStatus? = nil, cacheEntries: UInt64? = nil,
+                cacheHits: UInt64? = nil, cacheMisses: UInt64? = nil) {
         self.startedAt = startedAt
         self.totalQueries = totalQueries
         self.blockedQueries = blockedQueries
@@ -70,6 +77,28 @@ public struct TunnelRuntimeStats: Codable, Sendable, Equatable {
         self.memoryBytes = memoryBytes
         self.pausedUntil = pausedUntil
         self.resolverStatus = resolverStatus
+        self.cacheEntries = cacheEntries
+        self.cacheHits = cacheHits
+        self.cacheMisses = cacheMisses
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case startedAt, totalQueries, blockedQueries, blocklistEntryCount, memoryBytes
+        case pausedUntil, resolverStatus, cacheEntries, cacheHits, cacheMisses
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        startedAt = try c.decodeIfPresent(Date.self, forKey: .startedAt)
+        totalQueries = try c.decode(UInt64.self, forKey: .totalQueries)
+        blockedQueries = try c.decode(UInt64.self, forKey: .blockedQueries)
+        blocklistEntryCount = try c.decode(UInt64.self, forKey: .blocklistEntryCount)
+        memoryBytes = try c.decodeIfPresent(UInt64.self, forKey: .memoryBytes)
+        pausedUntil = try c.decodeIfPresent(Date.self, forKey: .pausedUntil)
+        resolverStatus = try c.decodeIfPresent(ResolverStatus.self, forKey: .resolverStatus)
+        cacheEntries = try c.decodeIfPresent(UInt64.self, forKey: .cacheEntries)
+        cacheHits = try c.decodeIfPresent(UInt64.self, forKey: .cacheHits)
+        cacheMisses = try c.decodeIfPresent(UInt64.self, forKey: .cacheMisses)
     }
 }
 

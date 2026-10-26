@@ -470,6 +470,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             await engine.setPaused(until: until)
             await notifier.pauseDeadlineChanged(until)
             response = .ok
+
+        case .clearDNSCache:
+            // No cache yet; the cache bead hooks in here.
+            response = .ok
         }
         return try? TunnelIPCCoder.encode(response)
     }
