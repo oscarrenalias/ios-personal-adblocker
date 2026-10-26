@@ -66,27 +66,43 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
     }
 
     public func resolve(_ query: Data) async throws -> Data {
+        do {
+            return try await resolveWithRoute(query).0
+        } catch let error as RoutedError {
+            throw error.underlying
+        }
+    }
+
+    public func resolveWithRoute(_ query: Data) async throws -> (Data, UpstreamRoute) {
         let parsed = try? DNSParser.parseQuery(query)
 
         if let parsed, Self.isLocal(parsed.questionName) {
             Self.logRoute(parsed, rule: "local-nxdomain")
-            return DNSResponseBuilder.nxdomain(for: parsed)
+            return (DNSResponseBuilder.nxdomain(for: parsed), .local)
         }
         if alternative == nil {
             Self.logRoute(parsed, rule: "alternative-off")
-            return try await network.resolve(query)
+            return try await viaNetwork(query, route: .network)
         }
         if let parsed, NetworkOnlyNames.matches(parsed.questionName) {
             Self.logRoute(parsed, rule: "network-only")
-            return try await network.resolve(query)
+            return try await viaNetwork(query, route: .networkOnlyName)
         }
-        guard let alternative else { return try await network.resolve(query) }
+        guard let alternative else { return try await viaNetwork(query, route: .network) }
         return try await resolveViaAlternative(query, parsed: parsed, alternative: alternative)
+    }
+
+    private func viaNetwork(_ query: Data, route: UpstreamRoute) async throws -> (Data, UpstreamRoute) {
+        do {
+            return (try await network.resolve(query), route)
+        } catch {
+            throw RoutedError(route: route, underlying: error)
+        }
     }
 
     /// Tries the alternative when its breaker is healthy; otherwise (or on failure)
     /// applies the fallback policy. Unparseable queries follow the same path.
-    private func resolveViaAlternative(_ query: Data, parsed: DNSQuery?, alternative: Alternative) async throws -> Data {
+    private func resolveViaAlternative(_ query: Data, parsed: DNSQuery?, alternative: Alternative) async throws -> (Data, UpstreamRoute) {
         let attempt: (healthy: Bool, generation: Int) = lock.withLock { (!breaker.isDown, breaker.generation) }
         guard attempt.healthy else {
             let probe: Int? = lock.withLock { startProbeIfDue() }
@@ -106,7 +122,7 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
                 return noteStatusChange()
             }
             notify(changed)
-            return response
+            return (response, .alternative)
         } catch {
             let changed: ResolverStatus? = lock.withLock {
                 breaker.recordFailure(generation: attempt.generation)
@@ -199,15 +215,15 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
         return Data(bytes)
     }
 
-    private func fallBack(_ query: Data, parsed: DNSQuery?, error: String, elapsed: TimeInterval) async throws -> Data {
+    private func fallBack(_ query: Data, parsed: DNSQuery?, error: String, elapsed: TimeInterval) async throws -> (Data, UpstreamRoute) {
         switch policy {
         case .networkDNS:
             Self.logRoute(parsed, rule: "fallback")
             Self.log.debug("\(Self.target(parsed)) alternative failed, re-sending to network: \(error) after \(Int((elapsed * 1000).rounded())) ms")
-            return try await network.resolve(query)
+            return try await viaNetwork(query, route: .fallback)
         case .none:
             Self.log.debug("\(Self.target(parsed)) alternative failed, no fallback: \(error)")
-            throw ResolverRouterError.alternativeFailed(error)
+            throw RoutedError(route: .alternative, underlying: ResolverRouterError.alternativeFailed(error))
         }
     }
 
