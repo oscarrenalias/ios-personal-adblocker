@@ -49,6 +49,15 @@ This is `docs/ROADMAP.md` item 6 (Quick controls). Agreed with the user on
 
 ## Visible numbers
 
+> **Resolved on device, 2026-10-26:** custom SF Symbols rendered blank in
+> Control Center. That happened even with a v3 template and with copies in
+> both the widget and app catalogs. The user chose built-in numbered symbols
+> instead: `5.circle`, `10.circle` and `30.circle`. The **60-minute button is
+> deferred**, because no built-in numbered symbol goes above 50. Defect
+> `B-11968724` does this. The rest of this section is the original plan, kept
+> for reference.
+
+
 - **Label title:** "Pause 5 min", "Pause 10 min", "Pause 30 min", "Pause 60
   min". This is shown in the medium and large control sizes.
 - **Icon:** the number must be readable in the small (1×1) size, where only
