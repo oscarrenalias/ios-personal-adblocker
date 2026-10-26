@@ -14,10 +14,10 @@ Written 2026-10-25.
 | 0 | ~~Finish reboot robustness~~ (defects `B-0d1e113d`, `B-28826355`) | — | ✅ done, verified 2026-10-25 |
 | 1 | [Configurable failure policy](#configurable-failure-policy): encryption part ✅ done (`spec-c7e3c45d`, `spec-d10b070a`); filtering part moves to 5 | KI-1 part 1 (done) | — |
 | 2 | [Reliable blocklist updates](#reliable-blocklist-updates) (`spec-27c7b48b`) | — (can run alongside 1) | ✅ done |
-| 3 | [DNS caching](#dns-caching) (`spec-697234a9`) | 1 (sits in front of the router) | ✅ built; on-device check pending |
+| 3 | [DNS caching](#dns-caching) (`spec-697234a9`) | 1 (sits in front of the router) | ✅ done, verified 2026-10-26 (low hit rate: iOS caches DNS itself) |
 | 4 | [Explain each decision](#explain-each-decision) + [Rule testing](#rule-testing) | 3 (to report "from cache") | L |
 | 5 | [Protection health indicator](#protection-health-indicator) | 0, 1 (status signals) | M |
-| 6 | [Quick controls](#quick-controls) (profiles dropped) | — | ✅ built; on-device acceptance pending |
+| 6 | [Quick controls](#quick-controls) (profiles dropped) | — | ✅ done, verified 2026-10-26 (pause buttons; 60-min button deferred) |
 | 7 | [Status notifications](#status-notifications) | resolver status (done); 5 for rules/health signals | ✅ built; on-device acceptance pending |
 
 Why this order:
