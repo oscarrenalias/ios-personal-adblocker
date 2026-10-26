@@ -6,6 +6,12 @@ import IBlockerKit
 public struct QueryLogView: View {
     @Environment(QueryLogViewModel.self) private var log
     @Environment(FilterListsViewModel.self) private var lists
+    @State private var selected: SelectedRecord?
+
+    private struct SelectedRecord: Identifiable {
+        let id = UUID()
+        let record: QueryLogRecord
+    }
 
     public init() {}
 
@@ -23,6 +29,8 @@ public struct QueryLogView: View {
                 } else {
                     List(Array(rows.enumerated()), id: \.offset) { _, record in
                         QueryLogRow(record: record)
+                            .contentShape(Rectangle())
+                            .onTapGesture { selected = SelectedRecord(record: record) }
                             .contextMenu {
                                 if record.verdict == .blocked {
                                     Button {
@@ -45,6 +53,10 @@ public struct QueryLogView: View {
                             }
                     }
                     .listStyle(.plain)
+                    .sheet(item: $selected) { item in
+                        QueryLogDetailView(record: item.record)
+                            .presentationDetents([.medium, .large])
+                    }
                 }
             }
             .navigationTitle("Query Log")

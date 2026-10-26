@@ -47,6 +47,14 @@ public struct FilterListsView: View {
                     Text("Your allowlist always wins — use it to unbreak a site.")
                 }
 
+                Section {
+                    NavigationLink {
+                        TestDomainView()
+                    } label: {
+                        Label("Test a domain", systemImage: "magnifyingglass")
+                    }
+                }
+
                 if let error = lists.errorMessage {
                     Section {
                         HStack {
