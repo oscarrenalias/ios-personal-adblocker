@@ -49,6 +49,8 @@ public enum TunnelRequest: Codable, Sendable {
     case setPause(until: Date?)
     /// Drop every cached DNS answer; answered with .ok.
     case clearDNSCache
+    /// Persist buffered query-log entries to disk now; answered with .ok.
+    case flushLog
 }
 
 public struct TunnelRuntimeStats: Codable, Sendable, Equatable {

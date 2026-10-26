@@ -489,6 +489,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             Self.log.info("IPC clearDNSCache")
             await engine.clearCache(reason: .user)
             response = .ok
+
+        case .flushLog:
+            await engine.flush()
+            response = .ok
         }
         return try? TunnelIPCCoder.encode(response)
     }
