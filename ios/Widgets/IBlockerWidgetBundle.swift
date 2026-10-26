@@ -7,6 +7,10 @@ struct IBlockerWidgetBundle: WidgetBundle {
         StatusWidget()
         if #available(iOS 18.0, *) {
             ProtectionControl()
+            Pause5Control()
+            Pause10Control()
+            Pause30Control()
+            Pause60Control()
         }
     }
 }
