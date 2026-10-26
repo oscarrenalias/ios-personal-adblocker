@@ -157,6 +157,113 @@ public struct DNSCache: Sendable {
         return true
     }
 
+    /// Applies the store rules to an upstream `response` for `query` and, when
+    /// it is cacheable, stores it under the query's key. Returns false (and
+    /// debug-logs the reason) when the response is not cached.
+    @discardableResult
+    public mutating func store(query: DNSQuery, response: Data) -> Bool {
+        let label = "\(query.questionName) \(DNSRecordType.name(query.qtype))"
+        if let reason = Self.bypassReason(for: query) {
+            Self.log.debug("not cached \(label): \(reason)")
+            return false
+        }
+        let bytes = [UInt8](response)
+        switch Self.entryTTL(query: query, response: bytes) {
+        case .failure(let reason):
+            Self.log.debug("not cached \(label): \(reason.description)")
+            return false
+        case .success(let ttl):
+            let key = Key(rawQuestion: query.rawQuestion, hasEDNS: query.hasAdditionalRecords)
+            guard store(key, response: bytes, entryTTL: ttl) else {
+                Self.log.debug("not cached \(label): TTL 0 or too large")
+                return false
+            }
+            Self.log.debug("stored \(label), ttl \(ttl) s")
+            return true
+        }
+    }
+
+    /// Why a query must skip the cache (no lookup, no store), or nil when it
+    /// may use it. Only IN queries qualify; CD and the OPT DO bit bypass.
+    static func bypassReason(for query: DNSQuery) -> String? {
+        guard query.qclass == 1 else { return "class not IN" }
+        if query.flags & 0x0010 != 0 { return "CD set" }
+        if query.hasAdditionalRecords {
+            guard let records = try? DNSRecordWalker.walk([UInt8](query.raw)) else {
+                return "unparseable query"
+            }
+            // The OPT TTL field holds ext-rcode, version and flags; DO is the top flag bit.
+            if records.contains(where: { $0.isOPT && $0.ttl & 0x8000 != 0 }) { return "DO set" }
+        }
+        return nil
+    }
+
+    enum NotCacheable: Error, Equatable {
+        case unparseable
+        case tooLarge
+        case notAResponse
+        case truncated
+        case questionMismatch
+        case rcode(UInt8)
+        case zeroTTL
+
+        var description: String {
+            switch self {
+            case .unparseable: return "unparseable response"
+            case .tooLarge: return "response over \(DNSCache.maxResponseBytes) bytes"
+            case .notAResponse: return "not a response"
+            case .truncated: return "TC set"
+            case .questionMismatch: return "question mismatch"
+            case .rcode(let code): return code == 2 ? "SERVFAIL" : code == 5 ? "REFUSED" : "rcode \(code)"
+            case .zeroTTL: return "TTL 0"
+            }
+        }
+    }
+
+    public static let maxResponseBytes = 4_096
+    static let maxPositiveTTL: UInt32 = 3_600
+    static let maxNegativeTTL: UInt32 = 300
+    static let noSOANegativeTTL: UInt32 = 30
+
+    /// Computes the cache TTL for `response`, or why it can't be cached.
+    static func entryTTL(query: DNSQuery, response: [UInt8]) -> Result<UInt32, NotCacheable> {
+        guard response.count <= maxResponseBytes else { return .failure(.tooLarge) }
+        guard response.count >= 12 else { return .failure(.unparseable) }
+        let flags = (UInt16(response[2]) << 8) | UInt16(response[3])
+        guard flags & 0x8000 != 0 else { return .failure(.notAResponse) }
+        guard flags & 0x0200 == 0 else { return .failure(.truncated) }
+        let rcode = UInt8(flags & 0x000F)
+        guard rcode == 0 || rcode == 3 else { return .failure(.rcode(rcode)) }
+
+        let qd = (Int(response[4]) << 8) | Int(response[5])
+        guard qd == 1 else { return .failure(.questionMismatch) }
+        guard let nameEnd = try? DNSRecordWalker.skipName(response, at: 12),
+              nameEnd + 4 <= response.count else { return .failure(.unparseable) }
+        let echoed = Key(rawQuestion: Array(response[12..<(nameEnd + 4)]), hasEDNS: false)
+        let asked = Key(rawQuestion: query.rawQuestion, hasEDNS: false)
+        guard echoed == asked else { return .failure(.questionMismatch) }
+
+        guard let records = try? DNSRecordWalker.walk(response) else { return .failure(.unparseable) }
+
+        let answerTTLs = records.filter { $0.section == .answer && !$0.isOPT }.map(\.ttl)
+        let ttl: UInt32
+        if rcode == 0, let minimum = answerTTLs.min() {
+            ttl = min(minimum, maxPositiveTTL)
+        } else {
+            var negative = noSOANegativeTTL
+            if let soa = records.first(where: { $0.section == .authority && $0.type == DNSRecordType.soa }),
+               soa.rdataRange.count >= 4 {
+                let end = soa.rdataRange.upperBound
+                let minimumField = (UInt32(response[end - 4]) << 24) | (UInt32(response[end - 3]) << 16)
+                    | (UInt32(response[end - 2]) << 8) | UInt32(response[end - 1])
+                negative = min(minimumField, soa.ttl, maxNegativeTTL)
+            }
+            ttl = negative
+        }
+        guard ttl > 0 else { return .failure(.zeroTTL) }
+        return .success(ttl)
+    }
+
     /// Drops every entry, bumps the generation and logs at notice.
     /// Returns the number of entries dropped.
     @discardableResult
