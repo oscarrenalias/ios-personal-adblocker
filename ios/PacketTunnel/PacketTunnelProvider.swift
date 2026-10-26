@@ -47,12 +47,20 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     /// Mirrors `status` into the shared settings and reloads the widget
     /// timeline only when the gate says the visible line changed.
-    private func publishWidgetStatus(_ status: ResolverStatus?) {
+    /// `status` is read inside the critical section, and a non-nil `generation`
+    /// is re-checked there, so a late callback from a replaced router can't
+    /// publish after (or over) a newer router's value.
+    private func publishWidgetStatus(generation: Int? = nil, _ status: () -> ResolverStatus?) {
         guard let settings = AppGroupPaths.groupID(from: Bundle.main).flatMap({ SharedSettings(groupID: $0) }) else {
             Self.log.error("widget resolver status not published: app group unavailable")
             return
         }
         widgetPublished.withValue { last in
+            if let generation, routerGeneration.withValue({ $0 }) != generation {
+                Self.log.info("widget resolver status ignored: replaced router")
+                return
+            }
+            let status = status()
             do {
                 try settings.writeWidgetResolverStatus(status)
             } catch {
@@ -332,7 +340,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     notifyLog.info("ignored status change from replaced router")
                     return
                 }
-                self?.publishWidgetStatus(status)
+                self?.publishWidgetStatus(generation: generation) { status }
                 if let engine = engineBox.withValue({ $0 }) {
                     Task { await engine.clearCache(reason: .resolverStatusChange) }
                 }
@@ -475,7 +483,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         try await setTunnelNetworkSettings(networkSettings)
         settings?.protectionActive = true
-        publishWidgetStatus(settingsReadable ? router.status : nil)
+        publishWidgetStatus { settingsReadable ? router.status : nil }
         reloadWidget(reason: "start")
         await notifier.tunnelStarted()
         if recovery.isDegraded { await notifier.degradedStarted() }
@@ -540,7 +548,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if let newRouter = makeRouter(resolverSettings, source: "ipc") {
                 await engine.setUpstream(newRouter)
                 router = newRouter
-                publishWidgetStatus(newRouter.status)
+                publishWidgetStatus { newRouter.status }
                 await notifier.resolverStatusChanged(newRouter.status)
                 response = .ok
             } else {
@@ -749,7 +757,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         if let newRouter = self.makeRouter(resolverSettings, source: "recovery") {
                             await engine.setUpstream(newRouter)
                             self.router = newRouter
-                            self.publishWidgetStatus(newRouter.status)
+                            self.publishWidgetStatus { newRouter.status }
                             await self.notifier.resolverStatusChanged(newRouter.status)
                             upstreamName = resolverSettings.useAlternative ? resolverSettings.alternativeName : "Network DNS"
                         }
