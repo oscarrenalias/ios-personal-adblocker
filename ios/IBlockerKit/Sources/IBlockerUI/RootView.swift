@@ -1,6 +1,30 @@
 #if os(iOS)
 import SwiftUI
 import IBlockerKit
+import Observation
+
+/// Carries a notification-tap destination from the app's notification
+/// delegate to `RootView`. A shared instance, so a tap that cold-launches the
+/// app is still picked up once the view appears.
+@MainActor @Observable
+public final class NotificationTabRouter {
+    public static let shared = NotificationTabRouter()
+
+    public private(set) var pendingTab: StatusNotificationKind.Tab?
+
+    public func route(to tab: StatusNotificationKind.Tab) {
+        pendingTab = tab
+    }
+
+    fileprivate func consume() -> RootTab? {
+        defer { pendingTab = nil }
+        switch pendingTab {
+        case .dashboard: return .dashboard
+        case .lists: return .lists
+        case nil: return nil
+        }
+    }
+}
 
 /// Identifies each top-level tab in `RootView`.
 enum RootTab: Hashable {
@@ -26,6 +50,7 @@ public struct RootView: View {
     @State private var log: QueryLogViewModel
     @State private var showOnboarding: Bool
     @Environment(\.scenePhase) private var scenePhase
+    private let router = NotificationTabRouter.shared
 
     public init() {
         let paths = AppEnvironment.paths
@@ -65,6 +90,12 @@ public struct RootView: View {
                 await tunnel?.reloadRules()
             }
             await lists.ensureFreshCompile()
+        }
+        .onChange(of: router.pendingTab, initial: true) {
+            if let tab = router.consume() {
+                showOnboarding = false
+                selectedTab = tab
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
