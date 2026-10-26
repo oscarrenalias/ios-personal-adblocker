@@ -147,3 +147,45 @@ final class CompilerAndMatcherTests: XCTestCase {
         return try CompiledBlocklistView(contentsOf: url)
     }
 }
+
+// MARK: - blocklist-changed signal
+
+extension CompilerAndMatcherTests {
+    func testCompilePostsBlocklistChangedOnceAfterAllWrites() throws {
+        let paths = AppGroupPaths(containerURL: try makeTempDirectory())
+        try paths.ensureDirectories()
+        var state = FilterListState()
+        state.userDenylist = ["deny.example.com"]
+
+        var posted: [TunnelSignal] = []
+        var blobGenerationsAtPost: [UInt32] = []
+        var filesExistAtPost = false
+        let stats = try BlocklistCompiler.compile(state: &state, paths: paths) { signal in
+            posted.append(signal)
+            let fm = FileManager.default
+            filesExistAtPost = [paths.blocklistURL, paths.userAllowlistURL, paths.userDenylistURL]
+                .allSatisfy { fm.fileExists(atPath: $0.path) }
+            if let v = try? CompiledBlocklistView(contentsOf: paths.userDenylistURL) {
+                blobGenerationsAtPost.append(v.generation)
+            }
+        }
+        XCTAssertEqual(posted, [.blocklistChanged])
+        XCTAssertTrue(filesExistAtPost)
+        XCTAssertEqual(blobGenerationsAtPost, [stats.generation])
+        XCTAssertEqual(stats.generation, state.generation)
+    }
+
+    func testFailedWritePostsNothing() throws {
+        let paths = AppGroupPaths(containerURL: try makeTempDirectory())
+        try paths.ensureDirectories()
+        // A directory where the deny list file should go makes the last write fail.
+        try? FileManager.default.removeItem(at: paths.userDenylistURL)
+        try FileManager.default.createDirectory(
+            at: paths.userDenylistURL.appendingPathComponent("blocker"), withIntermediateDirectories: true)
+
+        var state = FilterListState()
+        var posted: [TunnelSignal] = []
+        XCTAssertThrowsError(try BlocklistCompiler.compile(state: &state, paths: paths) { posted.append($0) })
+        XCTAssertTrue(posted.isEmpty)
+    }
+}
