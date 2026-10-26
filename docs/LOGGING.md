@@ -70,10 +70,10 @@ Status notifications (policy, poster, tunnel and app triggers) log under
 
 | Level | Events |
 |---|---|
-| `notice` | `scheduled <kind> in N s`; `posted restored for <kind>`; `authorization requested: granted/denied`; `stop classified expected/unexpected: reason <name>, user-off marker set/clear` |
-| `info` | `suppressed <kind>: <reason>` (master off, type disabled, rate-limited, already notified this episode, not authorized); `cancelled pending <kind> (cleared after N s)`; `notification tap: kind, tab`; `tunnel-gone check: <result>`; `<kind> episode ended (list <id>)` |
+| `notice` | `scheduled <kind> in N s`; `posted restored for <kind>`; `authorization requested: granted/denied`; `stop classified expected/unexpected: reason <name>, user-off marker set/clear`; `user-off marker set: stop reason userInitiated`; `user-off marker cleared: tunnel started` |
+| `info` | `suppressed <kind>: <reason>` (master off, type disabled, rate-limited, already notified this episode, not authorized); `cancelled pending <kind> (cleared after N s)`; `opened from notification kind <kind> -> <tab>`; `resolver episodes dismissed: alternative turned off`; `ignored status change from replaced router`; `tunnel-gone check: <result>`; `<kind> episode ended (list <id>)` |
 | `error` | `authorization request failed`; `add failed for <kind>` |
-| `debug` | policy trace (inputs and outcome of each decision), `no problem/restore content for <kind>`, deferred degraded notification, `list-rejected not notified: user-triggered run` |
+| `debug` | policy trace (inputs and outcome of each decision), `no problem/restore content for <kind>`, deferred degraded notification, deferred or retried tunnel start notification, `list-rejected not notified: user-triggered run` |
 
 ## Reading the logs
 

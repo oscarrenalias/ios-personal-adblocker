@@ -1,6 +1,7 @@
 import Network
 import NetworkExtension
 import os
+import UserNotifications
 import IBlockerKit
 import IBlockerTunnelKit
 
@@ -29,6 +30,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private let physicalInterface = InterfaceIndexBox()
     private let pathQueue = DispatchQueue(label: "net.renalias.adblocker.tunnel.path")
     private let notifier = StatusNotifier()
+    /// Bumped by every `makeRouter`; callbacks from older routers are dropped.
+    private let routerGeneration = LockedBox(0)
 
     /// Drives status notification events 1-4, 6 and 7 through the policy and poster.
     /// An actor so router callbacks, IPC and start/stop don't interleave
@@ -45,11 +48,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         /// Event 7 is wanted but the shared settings were unreadable when
         /// the tunnel started degraded; retried until they can be read.
         private var degradedStartPending = false
+        /// Same for events 4 and the user-off marker reset: the tunnel started
+        /// before settings were readable.
+        private var tunnelStartPending = false
 
         func tunnelStarting() {
             running = true
             lastPauseDeadline = nil
             degradedStartPending = false
+            tunnelStartPending = false
         }
 
         /// Event 7: starts the 5 min degraded debounce.
@@ -63,8 +70,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
         }
 
-        /// Retries a deferred event 7 once settings are readable.
-        func retryDegradedStart() async {
+        /// Retries deferred start events once settings are readable.
+        func retryDeferredStart() async {
+            if tunnelStartPending {
+                log.debug("retrying deferred tunnel start notification")
+                await tunnelStarted()
+            }
             guard degradedStartPending else { return }
             await degradedStarted()
         }
@@ -102,8 +113,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 name = n
                 events = [.problemCleared(.resolverFallback), .problemCleared(.resolverFailing)]
             case .network:
+                // Alternative turned off: end the episodes without a restore.
                 name = nil
-                events = [.problemCleared(.resolverFallback), .problemCleared(.resolverFailing)]
+                events = [.problemDismissed(.resolverFallback), .problemDismissed(.resolverFailing)]
+                log.info("resolver episodes dismissed: alternative turned off")
             }
             if let name { lastResolverName = name }
             await run(events, resolverName: name ?? lastResolverName)
@@ -113,7 +126,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         func tunnelStopped(reason: NEProviderStopReason) async {
             running = false
             let stopReason = TunnelStopReason(rawValue: reason.rawValue)
-            let marker = Self.settings()?.userTurnedOff ?? false
+            let settings = Self.settings()
+            if stopReason == .userInitiated, let settings {
+                // e.g. VPN switched off in iOS Settings: the app never sees
+                // this stop, so mark it or checkTunnelGone raises a false alarm.
+                settings.userTurnedOff = true
+                log.notice("user-off marker set: stop reason userInitiated")
+            }
+            let marker = settings?.userTurnedOff ?? false
             let classification = StatusNotificationPolicy.classifyStop(reason: stopReason, userTurnedOffMarker: marker)
             log.notice("stop classified \(classification == .expected ? "expected" : "unexpected"): reason \(stopReason.logName), user-off marker \(marker ? "set" : "clear")")
             var events: [StatusNotificationEvent] = [.tunnelStopped]
@@ -124,7 +144,22 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         /// Cancels a pending event 3, or posts its restore (event 4).
         func tunnelStarted() async {
             running = true
-            await run([.problemCleared(.protectionStopped)], resolverName: nil)
+            guard let settings = Self.settings(), settings.settingsAvailable else {
+                tunnelStartPending = true
+                log.debug("tunnel start notification deferred: settings unreadable")
+                return
+            }
+            // Protection is on, whoever started it (e.g. the iOS Settings toggle).
+            if settings.userTurnedOff {
+                settings.userTurnedOff = false
+                log.notice("user-off marker cleared: tunnel started")
+            }
+            if await run([.problemCleared(.protectionStopped)], resolverName: nil) {
+                tunnelStartPending = false
+            } else {
+                tunnelStartPending = true
+                log.debug("tunnel start notification deferred: settings unreadable")
+            }
         }
 
         private static func settings() -> SharedSettings? {
@@ -213,11 +248,19 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             alternative = (upstream, settings.alternativeName, settings.alternative.isEncrypted)
         }
         let notifier = notifier
+        let generation = routerGeneration.withValue { $0 += 1; return $0 }
+        let generationBox = routerGeneration
+        let notifyLog = Log(category: "notify")
         let router = ResolverRouter(
             network: network,
             alternative: alternative,
             policy: settings.fallbackPolicy,
             onStatusChange: { status in
+                // In-flight probes/queries of a replaced router can still report.
+                guard generationBox.withValue({ $0 }) == generation else {
+                    notifyLog.info("ignored status change from replaced router")
+                    return
+                }
                 Task { await notifier.resolverStatusChanged(status) }
             }
         )
@@ -269,6 +312,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         self.paths = paths
         try? paths.ensureDirectories()
         await notifier.tunnelStarting()
+        // Removal needs no shared state, so it works before first unlock too.
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [StatusNotificationKind.protectionStopped.notificationIdentifier])
 
         let settings = SharedSettings(groupID: groupID)
         let settingsReadable = settings?.settingsAvailable ?? false
@@ -504,7 +550,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     await engine.setPaused(until: settings.pausedUntil)
                     await self.notifier.pauseDeadlineChanged(settings.pausedUntil)
                     Self.applyVerbose(until: settings.verboseLoggingUntil)
-                    if settingsReadable { await self.notifier.retryDegradedStart() }
+                    if settingsReadable { await self.notifier.retryDeferredStart() }
                 }
 
                 var reloaded: DomainMatcher?

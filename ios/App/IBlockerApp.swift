@@ -6,7 +6,7 @@ import UserNotifications
 /// Shows status notifications while the app is in the foreground and routes
 /// a tap to the tab named in the notification's userInfo.
 final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
-    private let log = Log(category: "app")
+    private let log = Log(category: "notify")
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -23,7 +23,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         let tabName = info[StatusNotificationContent.tabKey] as? String
         let tab = tabName.flatMap(StatusNotificationKind.Tab.init(rawValue:)) ?? .dashboard
         let kind = info[StatusNotificationContent.kindKey] as? String ?? "unknown"
-        log.info("notification tap: kind \(kind), tab \(tab.rawValue)")
+        log.info("opened from notification kind \(kind) -> \(tab.rawValue)")
         await MainActor.run { NotificationTabRouter.shared.route(to: tab) }
     }
 }
