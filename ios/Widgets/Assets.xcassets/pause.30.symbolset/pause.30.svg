@@ -7,8 +7,12 @@
   <text transform="matrix(1 0 0 1 263 342)" font-family="'SF Pro Text'" font-size="13">Custom symbol: pause for 30 minutes (Regular-M only).</text>
  </g>
  <g id="Guides">
+  <line id="Baseline-S" x1="263" x2="3036" y1="696" y2="696" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
+  <line id="Capline-S" x1="263" x2="3036" y1="625.541" y2="625.541" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
   <line id="Baseline-M" x1="263" x2="3036" y1="1126" y2="1126" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
   <line id="Capline-M" x1="263" x2="3036" y1="1056" y2="1056" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
+  <line id="Baseline-L" x1="263" x2="3036" y1="1556" y2="1556" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
+  <line id="Capline-L" x1="263" x2="3036" y1="1485.54" y2="1485.54" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;"/>
  </g>
  <g id="Symbols">
   <g id="Regular-M" transform="matrix(1 0 0 1 1559.6 1126)">
