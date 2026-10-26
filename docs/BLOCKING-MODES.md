@@ -56,42 +56,63 @@ element-hiding rules (the supported subset) inside Safari. Enable it in
 Settings ▸ Apps ▸ Safari ▸ Extensions, refresh its rules from Personal AdBlocker's
 Settings tab.
 
-## The Apple tracker-relay leak (and why we block it)
+## Apple Private Relay and "Limit IP Address Tracking"
 
-iOS "Limit IP Address Tracking" (ON by default per network) routes
-connections to known trackers through **Apple's relay** (`mask.icloud.com`,
-`apple-relay.fastly-edge.com`, …). The tracker's hostname is resolved
-*remotely by the relay*, so those connections never touch on-device DNS —
-in-app ads load while the ad domains sit "Blocked" in the query log.
+**Shipped behaviour:** the app does nothing special about Apple's relays.
+The relay controls are hidden (`FeatureFlags.showAppleRelayControls =
+false`). The effective strategy is `blockDomains`, but the bundled relay list
+(`bundled-apple-relay`) is never compiled, so no Apple relay domains are
+blocked. The tunnel claims only the DNS route, not the default route.
+Private Relay and Limit IP Address Tracking keep working while protection
+runs.
 
-Three supported configurations — pick in Settings ▸ Apple Private Relay:
+**Measured on device (2026-10-26, iOS 18, encrypted resolver, OISD plus the
+built-in rules).** The same three checks were run with each setting
+combination:
+- the adblock.turtlecute.org test page in Safari;
+- an ad-supported game (Sudoku.com);
+- the tunnel's per-query logs.
 
-**Auto-suspend (the AdGuard way):** the tunnel claims the default route
-(while excluding all real traffic via more-specific routes, so nothing
-actually flows through it). iOS treats it as a full VPN and pauses Private
-Relay and tracker relaying on its own while protection runs; the relay
-returns the moment protection stops. No Apple domains blocked, no Settings
-changes needed. This is what commercial blockers ride on — their users'
-relays were always silently off while "protected".
+| Setting | Safari lookups reach the blocker | Test page score | In-app ads |
+|---|---|---|---|
+| Both off | yes | 90% (missed domains were cached while protection was off) | blocked |
+| Limit IP Address Tracking on | yes | 94% | blocked |
+| Plus iCloud Private Relay on | yes | 94% (same misses) | blocked |
 
-**Max blocking (default):** "Block Apple tracker relay" ON. The relay
-endpoints are blocked, iOS falls back to direct connections, everything
-goes through the filter. Trade-off: paid iCloud+ Private Relay reports
-"unavailable".
+What that means:
+- **Private Relay doesn't take Safari out of the filter** while this VPN is
+  running. Safari's lookups, for example `www.bbc.com`, still reached the
+  tunnel and went out over the encrypted resolver, and blocking was
+  unchanged. Private Relay's own endpoints (`mask.apple-dns.net`,
+  `mask-api.icloud.com`) were looked up and allowed.
+- **Limit IP Address Tracking lets a few Safari tracker connections
+  through.** One known tracker, `weather-analytics-events.apple.com`, loaded
+  on the test page even though the tunnel blocked its lookup. Safari sent
+  that connection through Apple's relay, which resolves the name itself.
+  This affected 1 of 132 test domains.
+- **In-app ads are unaffected by either setting.** Apps resolve their ad
+  networks through system DNS, and those were blocked in every phase:
+  - AppLovin
+  - Moloco
+  - Mintegral
+  - Unity Ads
+  - Amazon
+- **The remaining test-page misses were gaps in the lists** (for example
+  `ads.tiktok.com`, `sessions.bugsnag.com`, `browser.sentry-cdn.com`), not
+  the relay. Adding HaGeZi Pro narrows them.
 
-**Keep Private Relay:** toggle OFF, then turn OFF "Limit IP Address
-Tracking" in Settings ▸ Wi-Fi ▸ ⓘ (each network) and Settings ▸ Cellular ▸
-Cellular Data Options. Result: Safari browsing keeps Apple's IP masking
-(Private Relay carries Safari, not in-app ads), apps' tracker traffic goes
-direct and gets filtered, and Safari ads stay blocked by the content
-blocker, which works inside WebKit regardless of the network path. The only
-delta vs. max blocking: trackers *not* on any of your lists connect
-directly with your real IP instead of a masked one — enabling HaGeZi Pro
-narrows that set.
+**Why relay blocking stays off:** blocking the relay endpoints, or claiming
+the default route so that iOS suspends the relays (`autoSuspend`), would
+break Private Relay for the whole phone. That's too high a price for the
+handful of Safari tracker connections that Limit IP Address Tracking
+carries. The Safari content blocker also applies inside WebKit, whatever
+path the network traffic takes. The `RelayStrategy` code stays in place
+behind the flag in case this changes.
 
-The Blocking Test knows about both modes: with the relay allowed, the relay
-probes turn informational and remind you about the Limit IP Address
-Tracking switches instead of failing the verdict.
+**If you want those last Safari trackers filtered too:** turn off Limit IP
+Address Tracking in Settings ▸ Wi-Fi ▸ ⓘ (for each network) and in
+Settings ▸ Cellular ▸ Cellular Data Options. Tracker connections then go
+direct, and the DNS blocking applies to them.
 
 ## What none of these can do
 

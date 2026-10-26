@@ -15,7 +15,7 @@ worth knowing.
 
 1. [x] [KI-1](#ki-1-no-fallback-when-the-dns-resolver-is-unreachable) Resolver fallback and captive Wi-Fi
 2. [x] [KI-2](#ki-2-lookups-with-large-answers-fail) Large DNS answers
-3. [ ] [KI-3](#ki-3-apple-relay-handling-is-switched-off-docs-say-otherwise) Apple relay: test on device, then fix code or docs
+3. [x] [KI-3](#ki-3-apple-relay-handling-is-switched-off-docs-say-otherwise) Apple relay (tested on device; docs corrected, relay handling stays off)
 4. [x] [KI-4](#ki-4-tunnel-wakes-up-every-2-seconds) Battery: 2-second wake-ups (fixed: 60 s idle timer plus Darwin signals)
 5. [x] [KI-5](#ki-5-background-list-refresh-probably-never-runs) Background refresh
 6. [x] [KI-6](#ki-6-list-exceptions-cant-unblock-subdomains) List exceptions (fixed: separate `listallow.bin`, suffix match)
@@ -93,7 +93,11 @@ them as IP fragments. Either way, update the comments.
 
 ### KI-3: Apple relay handling is switched off; docs say otherwise
 
-- **Status:** open, needs on-device testing first
+- **Status:** closed 2026-10-26. Tested on device. Private Relay didn't take
+  Safari out of the filter, and Limit IP Address Tracking let through only 1
+  of 132 test-page trackers in Safari, with in-app ads unaffected. Relay
+  handling stays off, and `docs/BLOCKING-MODES.md` now describes the measured
+  behaviour.
 - **Where:** `ios/IBlockerKit/Sources/IBlockerKit/Shared/FeatureFlags.swift`
   (`showAppleRelayControls = false`), `SeedRules.relayText`,
   `docs/BLOCKING-MODES.md`
