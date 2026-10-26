@@ -5,7 +5,7 @@ description: "Bounded TTL-respecting DNS cache in the tunnel (KI-9), 10 s blocke
 dependencies: null
 priority: high
 complexity: null
-status: planned
+status: done
 tags:
 - dns
 - tunnel
