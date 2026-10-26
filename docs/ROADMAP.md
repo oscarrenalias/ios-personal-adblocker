@@ -7,6 +7,26 @@ the spec IDs here.
 
 Written 2026-10-25.
 
+## Status (2026-10-26): feature-complete for personal use
+
+Everything below is done and verified on device, except the items in this
+list. They're documented so they can be picked up later, but no work is
+planned for now.
+
+| Item | Where it's described | State |
+|---|---|---|
+| Protection health indicator, plus the "block everything until rules load" filtering policy | [Protection health indicator](#protection-health-indicator), [Configurable failure policy](#configurable-failure-policy) | On hold: needs more design |
+| List-change preview in "Test a domain" | [Rule testing](#rule-testing) | Not started |
+| 60-minute Control Center pause button | [Quick controls](#quick-controls) | Deferred (the 60 min pause already exists in Shortcuts) |
+| Encryption state in Control Center controls | [Quick controls](#quick-controls) | Not started (the status widget shows it, `spec-6b871430`) |
+
+Also done since this roadmap was written, outside the numbered items:
+- event-driven tunnel maintenance (`spec-b210a0b5`, KI-4);
+- HaGeZi Multi Pro as an opt-in built-in list;
+- encryption state in the status widget (`spec-6b871430`);
+- closing KI-3 (relay behaviour measured and documented) and KI-8 (query log
+  stays on).
+
 ## Suggested order
 
 | # | Feature | Depends on | Size |
@@ -190,11 +210,13 @@ Profiles were **dropped** on 2026-10-25 to keep things simple.
   bundle, using the system numbered symbols (`5.circle` etc.). They set
   `SharedSettings.pausedUntil` through `PauseDeadline`. Custom symbols rendered
   blank in Control Center, and the 60 min button is deferred.
-  Still to confirm by hand on an iOS 18 device.
+  Verified on an iOS 18 device on 2026-10-26.
+- Encryption state in the status widget (`spec-6b871430`), verified on
+  2026-10-26.
 
-**Missing:**
-- Possibly: show encryption state in widgets and Control Center (follow-up
-  from `spec-c7e3c45d`).
+**Missing (not planned for now):**
+- A 60 min Control Center pause button.
+- Encryption state in the Control Center controls.
 
 ## Status notifications
 
