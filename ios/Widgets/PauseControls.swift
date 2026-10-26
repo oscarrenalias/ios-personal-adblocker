@@ -8,7 +8,7 @@ private let controlsLog = Logger(subsystem: "net.renalias.adblocker", category: 
 
 /// Control Center button that pauses ad blocking for a fixed number of minutes.
 @available(iOS 18.0, *)
-struct PauseControl: ControlWidget {
+struct PauseControl {
     let kind: String
     let minutes: Int
 
