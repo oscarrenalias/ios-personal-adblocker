@@ -6,12 +6,17 @@ public protocol DNSUpstream: Sendable {
     func resolve(_ query: Data) async throws -> Data
     /// Resolves and reports which route served the query. Non-routing upstreams report `.network`.
     func resolveWithRoute(_ query: Data) async throws -> (Data, UpstreamRoute)
+    /// Drops the current connection so the next query uses a new one. Used when a
+    /// query stalls; upstreams without a persistent connection do nothing.
+    func resetConnection(reason: String)
 }
 
 extension DNSUpstream {
     public func resolveWithRoute(_ query: Data) async throws -> (Data, UpstreamRoute) {
         (try await resolve(query), .network)
     }
+
+    public func resetConnection(reason: String) {}
 }
 
 /// Which path served (or failed) a query.
