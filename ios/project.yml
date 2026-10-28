@@ -30,7 +30,7 @@ settings:
     APP_GROUP_ID: group.net.renalias.adblocker
 
     MARKETING_VERSION: 1.0.0
-    CURRENT_PROJECT_VERSION: 4
+    CURRENT_PROJECT_VERSION: 5
     TARGETED_DEVICE_FAMILY: "1,2"
 
     SWIFT_VERSION: "5.0"
