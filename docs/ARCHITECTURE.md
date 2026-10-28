@@ -83,13 +83,22 @@ before the router. Rules, in order:
    throws. If a probe is due, one starts in the background.
 
 **Circuit breaker** (`Engine/CircuitBreaker.swift`, injected clock). Three
-consecutive failures trip it to `down`. Probes (`A apple.com`, 2 s timeout,
-NOERROR is success) are allowed after 30 s, then the wait doubles per failed
-probe (60, 120, 240) up to 300 s. A successful probe returns to healthy, and
-the next trip starts at 30 s again. There are no timers: a probe only starts
+consecutive failures trip it to `down`. A failure counts only if its request
+started at or after the last counted failure, so queries stalled together on
+one connection count as one. Probes (`A apple.com`, 2 s timeout,
+NOERROR is success) are allowed after 5 s, then the wait doubles per failed
+probe (10, 20, 40) up to 300 s. A successful probe returns to healthy, and
+the next trip starts at 5 s again. There are no timers: a probe only starts
 when a query that would have used the alternative arrives, or on a network
 change, so an idle phone isn't woken (KI-4). Each trip and reset bumps a
 generation counter, and results from older generations are ignored.
+
+**Connection reset.** When an alternative query fails or times out, when the
+breaker trips, and when a probe times out, the router calls
+`resetConnection(reason:)` on the alternative's upstream, at most once per
+2 s. `DoHUpstream` swaps its `URLSession` for a fresh one, so the next query
+opens a new connection instead of reusing a stalled one. Other upstreams
+ignore the call.
 
 The `resolver status old -> new` notice log reports `encrypted yes/no` from
 the new status itself (`.alternative(_, encrypted)`), not from the current

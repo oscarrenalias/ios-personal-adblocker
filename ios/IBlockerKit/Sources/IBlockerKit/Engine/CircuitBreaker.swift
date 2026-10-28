@@ -5,7 +5,9 @@ import Foundation
 /// Healthy until `failureThreshold` consecutive failures, then down until
 /// `nextProbeAt`, after which callers may probe it. Results are tagged with the
 /// generation current when the request started; results from an older
-/// generation (a trip or reset happened since) are ignored.
+/// generation (a trip or reset happened since) are ignored. A failure counts
+/// only if its request started at or after the last counted failure, so a burst
+/// of requests stalled on one connection counts once.
 public struct CircuitBreaker: Sendable {
     public enum State: Equatable, Sendable {
         case healthy(consecutiveFailures: Int)
@@ -13,7 +15,7 @@ public struct CircuitBreaker: Sendable {
     }
 
     public static let defaultFailureThreshold = 3
-    public static let defaultBackoff: TimeInterval = 30
+    public static let defaultBackoff: TimeInterval = 5
     public static let maxBackoff: TimeInterval = 300
 
     private static let log = Log(category: "router")
@@ -27,6 +29,8 @@ public struct CircuitBreaker: Sendable {
     private var probeStartedAt: Date?
     /// A network change asked for an immediate probe regardless of state.
     private var immediateProbePending = false
+    /// When the most recent counted failure happened; nil after success, trip or reset.
+    private var lastCountedFailureAt: Date?
 
     private let name: String
     private let effect: String
@@ -111,6 +115,7 @@ public struct CircuitBreaker: Sendable {
         state = .healthy(consecutiveFailures: 0)
         probeInFlight = false
         probeStartedAt = nil
+        lastCountedFailureAt = nil
         immediateProbePending = true
         Self.log.info("alternative resolver \(name) breaker reset by network change (generation \(generation))")
     }
@@ -131,19 +136,28 @@ public struct CircuitBreaker: Sendable {
         guard generation == self.generation else { return }
         switch state {
         case .healthy(let failures):
+            lastCountedFailureAt = nil
             if failures != 0 { state = .healthy(consecutiveFailures: 0) }
         case .down(_, _, let since):
             self.generation += 1
+            lastCountedFailureAt = nil
             state = .healthy(consecutiveFailures: 0)
             let downFor = now().timeIntervalSince(since)
             Self.log.notice("alternative resolver \(name) recovered after \(Int(downFor.rounded())) s down")
         }
     }
 
-    public mutating func recordFailure(generation: Int) {
+    /// - Parameter startedAt: when the failed request started. A failure whose request
+    ///   started before the last counted failure is part of the same burst and is not counted.
+    public mutating func recordFailure(generation: Int, startedAt: Date? = nil) {
         guard generation == self.generation else { return }
         switch state {
         case .healthy(let failures):
+            if let startedAt, let last = lastCountedFailureAt, startedAt < last {
+                Self.log.debug("failure not counted: request started before last counted failure")
+                return
+            }
+            lastCountedFailureAt = now()
             let count = failures + 1
             if count >= failureThreshold {
                 trip(backoff: initialBackoff, since: now(), failures: count)
@@ -158,6 +172,7 @@ public struct CircuitBreaker: Sendable {
 
     private mutating func trip(backoff: TimeInterval, since: Date, failures: Int) {
         generation += 1
+        lastCountedFailureAt = nil
         state = .down(nextProbeAt: now().addingTimeInterval(backoff), backoff: backoff, since: since)
         Self.log.notice("alternative resolver \(name) marked down after \(failures) failure(s), retry in \(Int(backoff)) s; \(effect)")
     }

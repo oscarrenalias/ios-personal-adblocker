@@ -27,14 +27,18 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
     private let lock = NSLock()
     private var breaker: CircuitBreaker
     private var lastStatus: ResolverStatus
+    private let now: @Sendable () -> Date
+    private var lastReset: Date?
 
     public init(
         network: DNSUpstream,
         alternative: Alternative?,
         policy: FallbackPolicy,
         breaker: CircuitBreaker? = nil,
+        now: @escaping @Sendable () -> Date = { Date() },
         onStatusChange: (@Sendable (ResolverStatus) -> Void)? = nil
     ) {
+        self.now = now
         self.onStatusChange = onStatusChange
         self.network = network
         self.alternative = alternative
@@ -112,7 +116,7 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
         }
 
         Self.logRoute(parsed, rule: "alternative")
-        let start = Date()
+        let start = now()
         do {
             let response = try await Self.withTimeout(Self.alternativeTimeout) {
                 try await alternative.upstream.resolve(query)
@@ -124,15 +128,38 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
             notify(changed)
             return (response, .alternative)
         } catch {
-            let changed: ResolverStatus? = lock.withLock {
-                breaker.recordFailure(generation: attempt.generation)
-                return noteStatusChange()
+            let (changed, tripped): (ResolverStatus?, Bool) = lock.withLock {
+                let wasDown = breaker.isDown
+                breaker.recordFailure(generation: attempt.generation, startedAt: start)
+                return (noteStatusChange(), !wasDown && breaker.isDown)
             }
             notify(changed)
+            let timedOut = (error as? ResolverRouterError) == .timeout
+            resetConnection(alternative, reason: timedOut ? "timeout" : "failure")
+            if tripped { resetConnection(alternative, reason: "breaker tripped") }
             return try await fallBack(
-                query, parsed: parsed, error: "\(error)", elapsed: Date().timeIntervalSince(start)
+                query, parsed: parsed, error: "\(error)", elapsed: now().timeIntervalSince(start)
             )
         }
+    }
+
+    /// Resets the alternative's connection, at most once per `alternativeTimeout`,
+    /// so a burst of simultaneous timeouts causes a single reset. Call without the lock.
+    private func resetConnection(_ alternative: Alternative, reason: String) {
+        let current = now()
+        let skippedAgo: TimeInterval? = lock.withLock {
+            if let last = lastReset, current.timeIntervalSince(last) < Self.alternativeTimeout {
+                return current.timeIntervalSince(last)
+            }
+            lastReset = current
+            return nil
+        }
+        if let skippedAgo {
+            Self.log.debug("connection reset skipped: last reset \(Int((skippedAgo * 1000).rounded())) ms ago")
+            return
+        }
+        Self.log.notice("alternative resolver \(alternative.name) connection reset: \(reason)")
+        alternative.upstream.resetConnection(reason: reason)
     }
 
     /// Must be called with the lock held. Returns the generation to tag the probe with
@@ -169,6 +196,9 @@ public final class ResolverRouter: DNSUpstream, @unchecked Sendable {
                     return noteStatusChange()
                 }
                 notify(changed)
+                if (error as? ResolverRouterError) == .timeout {
+                    resetConnection(alternative, reason: "probe timeout")
+                }
             }
         }
     }

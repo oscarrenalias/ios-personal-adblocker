@@ -8,6 +8,9 @@ private final class Mock: DNSUpstream, @unchecked Sendable {
     var handler: @Sendable (Data) async throws -> Data
     init(_ handler: @escaping @Sendable (Data) async throws -> Data) { self.handler = handler }
     var calls: Int { lock.withLock { _calls } }
+    private var _resets: [String] = []
+    var resets: [String] { lock.withLock { _resets } }
+    func resetConnection(reason: String) { lock.withLock { _resets.append(reason) } }
     func resolve(_ query: Data) async throws -> Data {
         lock.withLock { _calls += 1 }
         return try await handler(query)
@@ -188,6 +191,47 @@ final class ResolverRouterTests: XCTestCase {
         r = router(network: net, alt: nil)
         _ = try await r.resolve(garbage)
         XCTAssertEqual(net.calls, 1)
+    }
+
+    // MARK: connection stalls
+
+    private func stalled() -> Mock {
+        Mock { _ in try await Task.sleep(nanoseconds: 30_000_000_000); return Data() }
+    }
+
+    /// Device scenario: queries in flight on one stalled connection time out together.
+    func testConcurrentStalledQueriesResetOnceAndDoNotTrip() async throws {
+        let net = ok(), alt = stalled()
+        let r = router(network: net, alt: alt)
+        await withTaskGroup(of: Void.self) { g in
+            for i in 0..<4 { g.addTask { _ = try? await r.resolve(q("a\(i).example.com")) } }
+        }
+        XCTAssertEqual(alt.resets, ["timeout"])
+        XCTAssertEqual(r.status, .alternative(name: "Alt", encrypted: true))
+        XCTAssertEqual(net.calls, 4)
+    }
+
+    func testSequentialTimeoutsTripAndReset() async throws {
+        let net = ok(), alt = stalled()
+        let r = router(network: net, alt: alt)
+        for _ in 0..<3 { _ = try await r.resolve(q("example.com")) }
+        XCTAssertEqual(r.status, .fallingBack(name: "Alt"))
+        XCTAssertEqual(alt.resets.first, "timeout")
+        XCTAssertGreaterThanOrEqual(alt.resets.count, 3)
+    }
+
+    func testSuccessAfterResetKeepsHealthy() async throws {
+        let stall = FlagBox(true)
+        let alt = Mock { q in
+            if stall.value { try await Task.sleep(nanoseconds: 30_000_000_000) }
+            return answer(q)
+        }
+        let r = router(network: ok(), alt: alt)
+        _ = try await r.resolve(q("example.com"))
+        XCTAssertEqual(alt.resets, ["timeout"])
+        stall.value = false
+        _ = try await r.resolve(q("example.com"))
+        XCTAssertEqual(r.status, .alternative(name: "Alt", encrypted: true))
     }
 
     // MARK: probes (real clock, short backoff)

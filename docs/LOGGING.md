@@ -107,6 +107,17 @@ categories:
 | `tunnel` | `error` | `widget resolver status not published: app group unavailable`; `widget resolver status write failed: <error>`; `widget resolver status clear failed: <error>`; `widget resolver status not cleared: app group unavailable` |
 | `ui` | `info` | `cleared stale widget resolver status (vpn disconnected)` / `(vpn invalid)`, from `TunnelController` |
 
+### The `router` category
+
+`ResolverRouter` and `CircuitBreaker` log under `router`; `DoHUpstream` logs
+under `upstream`.
+
+| Category | Level | Events |
+|---|---|---|
+| `router` | `notice` | `alternative resolver <name> connection reset: <reason>`, reason is `timeout`, `failure`, `breaker tripped` or `probe timeout`; at most one every 2 s |
+| `router` | `debug` | `connection reset skipped: last reset N ms ago`; `failure not counted: request started before last counted failure` |
+| `upstream` | `info` | `doh session replaced (<url>)` |
+
 ### The `cache` category
 
 The tunnel's DNS cache (`DNSCache`) logs under `cache`. Domain names appear

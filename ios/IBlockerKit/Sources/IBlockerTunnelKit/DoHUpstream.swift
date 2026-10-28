@@ -12,9 +12,21 @@ import IBlockerKit
 /// the system resolver — which points at the tunnel itself.
 public final class DoHUpstream: DNSUpstream, @unchecked Sendable {
     private let url: URL
-    private let session: URLSession
+    private static let log = Log(category: "upstream")
+    private let configuration: URLSessionConfiguration
+    private let makeSession: @Sendable (URLSessionConfiguration) -> URLSession
+    private let lock = NSLock()
+    private var _session: URLSession
 
-    public init(url: URL, timeout: TimeInterval = 4) {
+    /// The session new queries use. Replaced by `resetConnection`.
+    var session: URLSession { lock.withLock { _session } }
+
+    public convenience init(url: URL, timeout: TimeInterval = 4) {
+        self.init(url: url, timeout: timeout, sessionFactory: { URLSession(configuration: $0) })
+    }
+
+    init(url: URL, timeout: TimeInterval = 4,
+         sessionFactory: @escaping @Sendable (URLSessionConfiguration) -> URLSession) {
         self.url = url
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = timeout
@@ -23,7 +35,22 @@ public final class DoHUpstream: DNSUpstream, @unchecked Sendable {
             "Accept": "application/dns-message",
             "Content-Type": "application/dns-message",
         ]
-        self.session = URLSession(configuration: configuration)
+        self.configuration = configuration
+        self.makeSession = sessionFactory
+        self._session = sessionFactory(configuration)
+    }
+
+    /// Replaces the session so the next query opens a new connection; the old session's
+    /// in-flight requests are cancelled.
+    public func resetConnection(reason: String) {
+        let fresh = makeSession(configuration)
+        let old: URLSession = lock.withLock {
+            let old = _session
+            _session = fresh
+            return old
+        }
+        old.invalidateAndCancel()
+        Self.log.info("doh session replaced (\(url.absoluteString))")
     }
 
     public convenience init?(config: UpstreamConfig) {

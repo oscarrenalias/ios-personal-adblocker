@@ -22,7 +22,7 @@ final class CircuitBreakerTests: XCTestCase {
         var b = make(clock)
         let g = b.generation
         trip(&b)
-        XCTAssertEqual(b.state, .down(nextProbeAt: clock.now.addingTimeInterval(30), backoff: 30, since: clock.now))
+        XCTAssertEqual(b.state, .down(nextProbeAt: clock.now.addingTimeInterval(5), backoff: 5, since: clock.now))
         XCTAssertEqual(b.generation, g + 1)
     }
 
@@ -70,7 +70,7 @@ final class CircuitBreakerTests: XCTestCase {
         XCTAssertTrue(b.isAvailable)
         trip(&b)
         XCTAssertFalse(b.isAvailable)
-        clock.advance(29.9)
+        clock.advance(4.9)
         XCTAssertFalse(b.isAvailable)
         clock.advance(0.1)
         XCTAssertTrue(b.isAvailable)
@@ -81,14 +81,14 @@ final class CircuitBreakerTests: XCTestCase {
         var b = make(clock)
         trip(&b)
         var backoffs: [TimeInterval] = []
-        for _ in 0..<6 {
+        for _ in 0..<8 {
             guard case .down(let next, let backoff, _) = b.state else { return XCTFail("not down") }
             backoffs.append(backoff)
             clock.advance(next.timeIntervalSince(clock.now))
             XCTAssertTrue(b.probeDue(clock.now))
             b.probeFailed(generation: b.generation, error: "fail")
         }
-        XCTAssertEqual(backoffs, [30, 60, 120, 240, 300, 300])
+        XCTAssertEqual(backoffs, [5, 10, 20, 40, 80, 160, 300, 300])
     }
 
     func testProbeDueOnlyOnceAndNotBeforeNextProbeAt() {
@@ -96,7 +96,7 @@ final class CircuitBreakerTests: XCTestCase {
         var b = make(clock)
         XCTAssertFalse(b.probeDue(clock.now))
         trip(&b)
-        clock.advance(29)
+        clock.advance(4)
         XCTAssertFalse(b.probeDue(clock.now))
         clock.advance(1)
         XCTAssertTrue(b.probeDue(clock.now))
@@ -104,14 +104,14 @@ final class CircuitBreakerTests: XCTestCase {
         XCTAssertFalse(b.probeDue(clock.now))
     }
 
-    func testProbeSuccessRestoresAndNextTripStartsAt30() {
+    func testProbeSuccessRestoresAndNextTripStartsAt5() {
         let clock = Clock()
         var b = make(clock)
         trip(&b)
-        clock.advance(30)
+        clock.advance(5)
         XCTAssertTrue(b.probeDue(clock.now))
-        b.probeFailed(generation: b.generation, error: "x")   // backoff now 60
-        clock.advance(60)
+        b.probeFailed(generation: b.generation, error: "x")   // backoff now 10
+        clock.advance(10)
         XCTAssertTrue(b.probeDue(clock.now))
         let g = b.generation
         b.probeSucceeded(generation: g)
@@ -119,7 +119,7 @@ final class CircuitBreakerTests: XCTestCase {
         XCTAssertEqual(b.generation, g + 1)
         trip(&b)
         guard case .down(_, let backoff, _) = b.state else { return XCTFail("not down") }
-        XCTAssertEqual(backoff, 30)
+        XCTAssertEqual(backoff, 5)
     }
 
     func testNetworkChange() {
@@ -140,7 +140,7 @@ final class CircuitBreakerTests: XCTestCase {
         let clock = Clock()
         var b = make(clock)
         trip(&b)
-        clock.advance(30)
+        clock.advance(5)
         XCTAssertTrue(b.probeDue(clock.now))
         let old = b.generation
         b.networkChange()
@@ -148,5 +148,36 @@ final class CircuitBreakerTests: XCTestCase {
         b.probeSucceeded(generation: old)
         XCTAssertEqual(b.state, .healthy(consecutiveFailures: 0))
         XCTAssertEqual(b.generation, old + 1)
+    }
+
+    func testBurstOfFailuresStartedBeforeFirstCountedCountsOnce() {
+        let clock = Clock()
+        var b = make(clock)
+        let started = clock.now
+        clock.advance(2)
+        for _ in 0..<3 { b.recordFailure(generation: b.generation, startedAt: started) }
+        XCTAssertEqual(b.state, .healthy(consecutiveFailures: 1))
+    }
+
+    func testSequentialFailuresTrip() {
+        let clock = Clock()
+        var b = make(clock)
+        for _ in 0..<3 {
+            let started = clock.now
+            clock.advance(2)
+            b.recordFailure(generation: b.generation, startedAt: started)
+        }
+        XCTAssertTrue(b.isDown)
+    }
+
+    func testSuccessClearsBurstWindow() {
+        let clock = Clock()
+        var b = make(clock)
+        let started = clock.now
+        clock.advance(2)
+        b.recordFailure(generation: b.generation, startedAt: started)
+        b.recordSuccess(generation: b.generation)
+        b.recordFailure(generation: b.generation, startedAt: started)
+        XCTAssertEqual(b.state, .healthy(consecutiveFailures: 1))
     }
 }
