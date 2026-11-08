@@ -16,3 +16,6 @@ ios/IBlocker.xcodeproj/
 .takt/logs/
 .takt/agent-runs/
 .takt/beads/
+
+# takt
+.takt/runs/
